@@ -18,12 +18,34 @@ mongoose.connect(MONGO_URI, {
 .then(() => console.log('🟢 CONECTADO A MONGO ATLAS'))
 .catch((err) => console.error('🔴 ERROR DE CONEXIÓN MONGO:', err.message));
 
-const DataStoreSchema = new mongoose.Schema({
-    key: { type: String, required: true, unique: true },
-    data: { type: mongoose.Schema.Types.Mixed, required: true }
-}, { timestamps: true });
+// Definición de modelos dinámicos con esquemas flexibles para cada módulo (Opción 2)
+const createModuleModel = (modelName, collectionName) => {
+    const schema = new mongoose.Schema({}, { strict: false, timestamps: true });
+    return mongoose.models[modelName] || mongoose.model(modelName, schema, collectionName);
+};
 
-const DataStore = mongoose.model('DataStore', DataStoreSchema);
+const Propiedad = createModuleModel('Propiedad', 'propiedades');
+const Prospecto = createModuleModel('Prospecto', 'prospectos');
+const Empleada = createModuleModel('Empleada', 'empleadas');
+const Tarea = createModuleModel('Tarea', 'tareas');
+const ReporteInspeccion = createModuleModel('ReporteInspeccion', 'reportes-inspeccion');
+const Lavanderia = createModuleModel('Lavanderia', 'lavanderia');
+const Faltante = createModuleModel('Faltante', 'faltantes');
+const Programacion = createModuleModel('Programacion', 'programacion');
+const Ruta = createModuleModel('Ruta', 'ruta');
+
+// Mapeo de rutas/claves a sus respectivos modelos de Mongoose
+const modelsMap = {
+    'propiedades': Propiedad,
+    'prospectos': Prospecto,
+    'empleadas': Empleada,
+    'tareas': Tarea,
+    'reportes-inspeccion': ReporteInspeccion,
+    'lavanderia': Lavanderia,
+    'faltantes': Faltante,
+    'programacion': Programacion,
+    'ruta': Ruta
+};
 
 // Endpoint de prueba de conexión directa a la BD
 app.get('/api/test-db', async (req, res) => {
@@ -33,53 +55,85 @@ app.get('/api/test-db', async (req, res) => {
         if (estadoMongo !== 1) {
             return res.status(500).json({ status: 'error', message: 'Mongo no está listo', state: estadoMongo });
         }
-        const total = await DataStore.countDocuments();
-        return res.json({ status: 'ok', totalDocumentos: total });
+        const total = await Propiedad.countDocuments();
+        return res.json({ status: 'ok', totalPropiedades: total });
     } catch (error) {
         return res.status(500).json({ status: 'error', detail: error.message });
     }
 });
 
-// GET Adaptativo blindado
+// GET Adaptativo por Colección Especifica
 app.get('/api/:key', async (req, res) => {
     const { key } = req.params;
-    console.log(`[API REQUEST] Solicitando clave: ${key}`);
+    console.log(`[API REQUEST] Solicitando colección: ${key}`);
 
     try {
-        // Si Mongo se desconectó, responder de inmediato sin congelar
         if (mongoose.connection.readyState !== 1) {
             console.error(`[API ERROR] Mongo no conectado al pedir: ${key}`);
             return res.status(503).json({ error: true, message: "Base de datos no disponible temporalmente" });
         }
 
-        const item = await DataStore.findOne({ key: key }).exec();
+        const Model = modelsMap[key];
+        if (!Model) {
+            console.log(`[API INFO] Clave '${key}' no mapeada a ninguna colección.`);
+            return res.status(404).json({ error: true, message: `Ruta /api/${key} inexistente` });
+        }
 
-        if (!item || !item.data) {
-            console.log(`[API INFO] Clave '${key}' no encontrada, retornando []`);
+        const items = await Model.find({}).exec();
+
+        if (!items || items.length === 0) {
+            console.log(`[API INFO] Colección '${key}' vacía, retornando []`);
             return res.json([]);
         }
 
-        console.log(`[API SUCCESS] Clave '${key}' enviada con éxito.`);
-        return res.json(item.data);
+        console.log(`[API SUCCESS] Colección '${key}' enviada con éxito.`);
+        return res.json(items);
     } catch (error) {
         console.error(`[API FATAL] Error procesando '${key}':`, error.message);
         return res.status(500).json({ error: true, message: error.message });
     }
 });
 
-// POST Adaptativo
+// POST Adaptativo para Colecciones (Soporta reemplazo masivo de arrays o inserción individual)
 app.post('/api/:key', async (req, res) => {
     try {
         const { key } = req.params;
         const data = req.body;
 
-        const updated = await DataStore.findOneAndUpdate(
-            { key: key },
-            { key: key, data: data },
-            { upsert: true, new: true }
-        );
+        const Model = modelsMap[key];
+        if (!Model) {
+            return res.status(404).json({ error: true, message: `Ruta /api/${key} inexistente` });
+        }
 
-        return res.json({ success: true, key: updated.key });
+        if (Array.isArray(data)) {
+            // Reemplazo completo de la colección si el cliente envía un arreglo completo
+            await Model.deleteMany({});
+            if (data.length > 0) {
+                await Model.insertMany(data);
+            }
+            return res.json({ success: true, count: data.length });
+        } else {
+            // Inserción o actualización de un documento individual
+            const nuevoItem = new Model(data);
+            await nuevoItem.save();
+            return res.json({ success: true, data: nuevoItem });
+        }
+    } catch (error) {
+        return res.status(500).json({ error: true, message: error.message });
+    }
+});
+
+// DELETE Específico por ID (Ideal para eliminar registros individuales como empleadas, propiedades, etc.)
+app.delete('/api/:key/:id', async (req, res) => {
+    try {
+        const { key, id } = req.params;
+        const Model = modelsMap[key];
+        if (!Model) {
+            return res.status(404).json({ error: true, message: `Ruta /api/${key} inexistente` });
+        }
+
+        await Model.findByIdAndDelete(id);
+        return res.json({ success: true });
     } catch (error) {
         return res.status(500).json({ error: true, message: error.message });
     }
