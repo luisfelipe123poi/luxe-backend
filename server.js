@@ -43,7 +43,7 @@ app.get('/', (req, res) => {
     res.send('🚀 Luxe Asset Management API funcionando correctamente en Render');
 });
 
-// GET: Obtener datos por clave (Ejemplo: /api/store/lux_properties_v10)
+// GET: Obtener datos por clave explícita (Ejemplo: /api/store/lux_properties_v10)
 app.get('/api/store/:key', async (req, res) => {
     try {
         const item = await DataStore.findOne({ key: req.params.key });
@@ -56,7 +56,7 @@ app.get('/api/store/:key', async (req, res) => {
     }
 });
 
-// POST: Guardar o Actualizar datos por clave
+// POST: Guardar o Actualizar datos por clave explícita
 app.post('/api/store/:key', async (req, res) => {
     try {
         const { key } = req.params;
@@ -74,8 +74,53 @@ app.post('/api/store/:key', async (req, res) => {
     }
 });
 
-// DELETE: Borrar colección por clave
+// DELETE: Borrar colección por clave explícita
 app.delete('/api/store/:key', async (req, res) => {
+    try {
+        await DataStore.deleteOne({ key: req.params.key });
+        res.json({ success: true, message: `Clave ${req.params.key} eliminada.` });
+    } catch (error) {
+        res.status(500).json({ error: 'Error al eliminar', details: error.message });
+    }
+});
+
+// ==========================================
+// RUTAS ADAPTATIVAS DIRECTAS (Ej: /api/propiedades, /api/prospectos, etc.)
+// ==========================================
+
+// GET dinámico para endpoints genéricos
+app.get('/api/:key', async (req, res) => {
+    try {
+        const item = await DataStore.findOne({ key: req.params.key });
+        if (!item) {
+            return res.json([]);
+        }
+        res.json(item.data);
+    } catch (error) {
+        res.status(500).json({ error: 'Error al obtener datos', details: error.message });
+    }
+});
+
+// POST dinámico para endpoints genéricos
+app.post('/api/:key', async (req, res) => {
+    try {
+        const { key } = req.params;
+        const data = req.body;
+
+        const updated = await DataStore.findOneAndUpdate(
+            { key: key },
+            { key: key, data: data },
+            { upsert: true, new: true }
+        );
+
+        res.json({ success: true, key: updated.key });
+    } catch (error) {
+        res.status(500).json({ error: 'Error al guardar datos', details: error.message });
+    }
+});
+
+// DELETE dinámico para endpoints genéricos
+app.delete('/api/:key', async (req, res) => {
     try {
         await DataStore.deleteOne({ key: req.params.key });
         res.json({ success: true, message: `Clave ${req.params.key} eliminada.` });
