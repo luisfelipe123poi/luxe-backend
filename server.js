@@ -166,6 +166,22 @@ app.delete('/api/:key/:id', async (req, res) => {
     }
 });
 
+// DELETE Específico por ID (Ya lo tienes configurado en tu servidor Express)
+app.delete('/api/:key/:id', async (req, res) => {
+    try {
+        const { key, id } = req.params;
+        const Model = modelsMap[key];
+        if (!Model) {
+            return res.status(404).json({ error: true, message: `Ruta /api/${key} inexistente` });
+        }
+
+        await Model.findByIdAndDelete(id);
+        return res.json({ success: true });
+    } catch (error) {
+        return res.status(500).json({ error: true, message: error.message });
+    }
+});
+
 // Manejo final de rutas no encontradas bajo /api
 app.use('/api/*', (req, res) => {
     res.status(404).json({ error: true, message: `Ruta ${req.originalUrl} inexistente` });
