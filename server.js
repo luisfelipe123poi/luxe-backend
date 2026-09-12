@@ -123,6 +123,33 @@ app.post('/api/:key', async (req, res) => {
     }
 });
 
+// PATCH Adaptativo por Colección y ID (Para actualizar registros individuales como reportes, tareas, etc.)
+app.patch('/api/:key/:id', async (req, res) => {
+    try {
+        const { key, id } = req.params;
+        const data = req.body;
+
+        const Model = modelsMap[key];
+        if (!Model) {
+            return res.status(404).json({ error: true, message: `Ruta /api/${key} inexistente` });
+        }
+
+        const itemActualizado = await Model.findByIdAndUpdate(
+            id,
+            { $set: data },
+            { new: true, runValidators: true }
+        );
+
+        if (!itemActualizado) {
+            return res.status(404).json({ error: true, message: 'Documento no encontrado para actualizar' });
+        }
+
+        return res.json(itemActualizado);
+    } catch (error) {
+        return res.status(500).json({ error: true, message: error.message });
+    }
+});
+
 // DELETE Específico por ID (Ideal para eliminar registros individuales como empleadas, propiedades, etc.)
 app.delete('/api/:key/:id', async (req, res) => {
     try {
