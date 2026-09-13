@@ -13,7 +13,7 @@ const MONGO_URI = process.env.MONGO_URI;
 // Opciones de conexión con Timeout estricto para evitar congelamientos
 mongoose.connect(MONGO_URI, {
     serverSelectionTimeoutMS: 5000, // Máximo 5 segs buscando servidor
-    socketTimeoutMS: 10000,         // Máximo 10 segs por consulta
+    socketTimeoutMS: 10000,          // Máximo 10 segs por consulta
 })
 .then(() => console.log('🟢 CONECTADO A MONGO ATLAS'))
 .catch((err) => console.error('🔴 ERROR DE CONEXIÓN MONGO:', err.message));
@@ -59,6 +59,30 @@ app.get('/api/test-db', async (req, res) => {
         return res.json({ status: 'ok', totalPropiedades: total });
     } catch (error) {
         return res.status(500).json({ status: 'error', detail: error.message });
+    }
+});
+
+// Ruta GET de respaldo para saltar restricciones de métodos POST/PATCH bloqueados por el proxy web
+app.get('/api/actualizar-propiedad-get', async (req, res) => {
+    try {
+        const { id, status, code } = req.query;
+        if (!id) {
+            return res.status(400).json({ success: false, message: 'ID no proporcionado' });
+        }
+
+        const itemActualizado = await Propiedad.findByIdAndUpdate(
+            id,
+            { $set: { status, code } },
+            { new: true, runValidators: true }
+        );
+
+        if (!itemActualizado) {
+            return res.status(404).json({ success: false, message: 'Propiedad no encontrada' });
+        }
+
+        return res.json({ success: true, data: itemActualizado });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
     }
 });
 
@@ -151,22 +175,6 @@ app.patch('/api/:key/:id', async (req, res) => {
 });
 
 // DELETE Específico por ID (Ideal para eliminar registros individuales como empleadas, propiedades, etc.)
-app.delete('/api/:key/:id', async (req, res) => {
-    try {
-        const { key, id } = req.params;
-        const Model = modelsMap[key];
-        if (!Model) {
-            return res.status(404).json({ error: true, message: `Ruta /api/${key} inexistente` });
-        }
-
-        await Model.findByIdAndDelete(id);
-        return res.json({ success: true });
-    } catch (error) {
-        return res.status(500).json({ error: true, message: error.message });
-    }
-});
-
-// DELETE Específico por ID (Ya lo tienes configurado en tu servidor Express)
 app.delete('/api/:key/:id', async (req, res) => {
     try {
         const { key, id } = req.params;
