@@ -13,7 +13,7 @@ const MONGO_URI = process.env.MONGO_URI;
 // Opciones de conexión con Timeout estricto para evitar congelamientos
 mongoose.connect(MONGO_URI, {
     serverSelectionTimeoutMS: 5000, // Máximo 5 segs buscando servidor
-    socketTimeoutMS: 10000,          // Máximo 10 segs por consulta
+    socketTimeoutMS: 10000,         // Máximo 10 segs por consulta
 })
 .then(() => console.log('🟢 CONECTADO A MONGO ATLAS'))
 .catch((err) => console.error('🔴 ERROR DE CONEXIÓN MONGO:', err.message));
@@ -62,17 +62,22 @@ app.get('/api/test-db', async (req, res) => {
     }
 });
 
-// Ruta GET ultra-segura para actualizar por ID evitando restricciones de Nginx
+// Ruta GET ultra-segura para actualizar por ID evitando restricciones de Nginx (Actualizada para recibir nombre, status y code)
 app.get('/api/update-propiedad-safe', async (req, res) => {
     try {
-        const { id, status, code } = req.query;
+        const { id, status, code, nombre } = req.query;
         if (!id) {
             return res.status(400).json({ success: false, message: 'ID no proporcionado' });
         }
 
+        const datosAModificar = {};
+        if (status !== undefined) datosAModificar.status = status;
+        if (code !== undefined) datosAModificar.code = code;
+        if (nombre !== undefined) datosAModificar.nombre = nombre;
+
         const itemActualizado = await Propiedad.findByIdAndUpdate(
             id,
-            { $set: { status, code } },
+            { $set: datosAModificar },
             { new: true, runValidators: true }
         );
 
@@ -89,14 +94,19 @@ app.get('/api/update-propiedad-safe', async (req, res) => {
 // Ruta GET de respaldo para saltar restricciones de métodos POST/PATCH bloqueados por el proxy web
 app.get('/api/actualizar-propiedad-get', async (req, res) => {
     try {
-        const { id, status, code } = req.query;
+        const { id, status, code, nombre } = req.query;
         if (!id) {
             return res.status(400).json({ success: false, message: 'ID no proporcionado' });
         }
 
+        const datosAModificar = {};
+        if (status !== undefined) datosAModificar.status = status;
+        if (code !== undefined) datosAModificar.code = code;
+        if (nombre !== undefined) datosAModificar.nombre = nombre;
+
         const itemActualizado = await Propiedad.findByIdAndUpdate(
             id,
-            { $set: { status, code } },
+            { $set: datosAModificar },
             { new: true, runValidators: true }
         );
 
