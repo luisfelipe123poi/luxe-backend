@@ -62,6 +62,30 @@ app.get('/api/test-db', async (req, res) => {
     }
 });
 
+// Ruta GET ultra-segura para actualizar por ID evitando restricciones de Nginx
+app.get('/api/update-propiedad-safe', async (req, res) => {
+    try {
+        const { id, status, code } = req.query;
+        if (!id) {
+            return res.status(400).json({ success: false, message: 'ID no proporcionado' });
+        }
+
+        const itemActualizado = await Propiedad.findByIdAndUpdate(
+            id,
+            { $set: { status, code } },
+            { new: true, runValidators: true }
+        );
+
+        if (!itemActualizado) {
+            return res.status(404).json({ success: false, message: 'Propiedad no encontrada' });
+        }
+
+        return res.json({ success: true, data: itemActualizado });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+});
+
 // Ruta GET de respaldo para saltar restricciones de métodos POST/PATCH bloqueados por el proxy web
 app.get('/api/actualizar-propiedad-get', async (req, res) => {
     try {
