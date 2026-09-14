@@ -27,6 +27,7 @@ const createModuleModel = (modelName, collectionName) => {
 const Propiedad = createModuleModel('Propiedad', 'propiedades');
 const Prospecto = createModuleModel('Prospecto', 'prospectos');
 const Empleada = createModuleModel('Empleada', 'empleadas');
+const Administrador = createModuleModel('Administrador', 'administradores');
 const Tarea = createModuleModel('Tarea', 'tareas');
 const ReporteInspeccion = createModuleModel('ReporteInspeccion', 'reportes-inspeccion');
 const Lavanderia = createModuleModel('Lavanderia', 'lavanderia');
@@ -40,6 +41,7 @@ const modelsMap = {
     'propiedades': Propiedad,
     'prospectos': Prospecto,
     'empleadas': Empleada,
+    'administradores': Administrador,
     'tareas': Tarea,
     'reportes-inspeccion': ReporteInspeccion,
     'lavanderia': Lavanderia,
