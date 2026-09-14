@@ -198,11 +198,12 @@ app.get('/api/:key', async (req, res) => {
     }
 });
 
-// POST Adaptativo para Colecciones (Soporta reemplazo masivo protegido por adminId para ruta y programacion, o inserción individual)
+// POST Adaptativo para Colecciones (Inyecta automáticamente el adminId si viene por query params)
 app.post('/api/:key', async (req, res) => {
     try {
         const { key } = req.params;
         const data = req.body;
+        const queryAdminId = req.query.adminId;
 
         const Model = modelsMap[key];
         if (!Model) {
@@ -210,9 +211,8 @@ app.post('/api/:key', async (req, res) => {
         }
 
         if (Array.isArray(data)) {
-            // Reemplazo completo de la colección de manera segura para evitar borrar datos de otros administradores
             if (key !== 'solicitudes-compartir') {
-                const adminId = req.query.adminId || (data.length > 0 ? data[0].adminId : null);
+                const adminId = queryAdminId || (data.length > 0 ? data[0].adminId : null);
                 if (adminId) {
                     await Model.deleteMany({ adminId });
                 } else if (key !== 'ruta' && key !== 'programacion') {
@@ -222,12 +222,22 @@ app.post('/api/:key', async (req, res) => {
                 }
             }
             if (data.length > 0) {
-                await Model.insertMany(data);
+                const nuevosDatos = data.map(item => {
+                    if (queryAdminId && !item.adminId) {
+                        return { ...item, adminId: queryAdminId };
+                    }
+                    return item;
+                });
+                await Model.insertMany(nuevosDatos);
             }
             return res.json({ success: true, count: data.length });
         } else {
-            // Inserción o actualización de un documento individual devolviendo el documento completo con su _id de MongoDB
-            const nuevoItem = new Model(data);
+            // Inserción individual: Asegura que el adminId quede registrado obligatoriamente
+            const itemData = { ...data };
+            if (queryAdminId && !itemData.adminId) {
+                itemData.adminId = queryAdminId;
+            }
+            const nuevoItem = new Model(itemData);
             await nuevoItem.save();
             return res.json(nuevoItem);
         }
