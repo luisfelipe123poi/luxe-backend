@@ -33,6 +33,7 @@ const Lavanderia = createModuleModel('Lavanderia', 'lavanderia');
 const Faltante = createModuleModel('Faltante', 'faltantes');
 const Programacion = createModuleModel('Programacion', 'programacion');
 const Ruta = createModuleModel('Ruta', 'ruta');
+const SolicitudCompartir = createModuleModel('SolicitudCompartir', 'solicitudes-compartir');
 
 // Mapeo de rutas/claves a sus respectivos modelos de Mongoose
 const modelsMap = {
@@ -44,7 +45,8 @@ const modelsMap = {
     'lavanderia': Lavanderia,
     'faltantes': Faltante,
     'programacion': Programacion,
-    'ruta': Ruta
+    'ruta': Ruta,
+    'solicitudes-compartir': SolicitudCompartir
 };
 
 // Endpoint de prueba de conexión directa a la BD
@@ -110,6 +112,48 @@ app.get('/api/actualizar-propiedad-get', async (req, res) => {
     }
 });
 
+// --- ENDPOINTS ESPECÍFICOS PARA SOLICITUDES DE SINCRONIZACIÓN ENTRE ADMINISTRADORES ---
+
+// Responder a una solicitud de sincronización (Aceptar e importar o Rechazar)
+app.post('/api/solicitudes-compartir/:id/responder', async (req, res) => {
+    try {
+        const { accion, adminId } = req.body;
+        const solicitudId = req.params.id;
+        const solicitud = await SolicitudCompartir.findById(solicitudId);
+
+        if (!solicitud) {
+            return res.status(404).json({ success: false, message: 'Solicitud no encontrada' });
+        }
+
+        if (accion === 'aceptar') {
+            const items = solicitud.items || [];
+            const nuevosItems = items.map(item => {
+                const newItemObj = { ...item };
+                delete newItemObj._id; // Limpiar ID anterior para evitar duplicados
+                newItemObj.adminId = adminId;
+                newItemObj.copiadoDe = solicitud.deAdminId;
+                return newItemObj;
+            });
+
+            if (solicitud.tipo === 'programacion' && nuevosItems.length > 0) {
+                await Programacion.insertMany(nuevosItems);
+            } else if (solicitud.tipo === 'ruta' && nuevosItems.length > 0) {
+                await Ruta.insertMany(nuevosItems);
+            }
+
+            await SolicitudCompartir.findByIdAndUpdate(solicitudId, { $set: { estado: 'aceptado' } });
+        } else {
+            await SolicitudCompartir.findByIdAndUpdate(solicitudId, { $set: { estado: 'rechazado' } });
+        }
+
+        return res.json({ success: true });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+// --- FIN ENDPOINTS ESPECÍFICOS ---
+
 // GET Adaptativo por Colección Especifica
 app.get('/api/:key', async (req, res) => {
     const { key } = req.params;
@@ -127,7 +171,17 @@ app.get('/api/:key', async (req, res) => {
             return res.status(404).json({ error: true, message: `Ruta /api/${key} inexistente` });
         }
 
-        const items = await Model.find({}).exec();
+        // Filtros dinámicos basados en query parameters
+        const queryFilter = {};
+        if (key === 'solicitudes-compartir') {
+            if (req.query.paraAdminId) queryFilter.paraAdminId = req.query.paraAdminId;
+            if (req.query.estado) queryFilter.estado = req.query.estado;
+            if (req.query.deAdminId) queryFilter.deAdminId = req.query.deAdminId;
+        } else if (req.query.adminId) {
+            queryFilter.adminId = req.query.adminId;
+        }
+
+        const items = await Model.find(queryFilter).exec();
 
         if (!items || items.length === 0) {
             console.log(`[API INFO] Colección '${key}' vacía, retornando []`);
@@ -154,8 +208,10 @@ app.post('/api/:key', async (req, res) => {
         }
 
         if (Array.isArray(data)) {
-            // Reemplazo completo de la colección si el cliente envía un arreglo completo
-            await Model.deleteMany({});
+            // Reemplazo completo de la colección si el cliente envía un arreglo completo (excepto solicitudes)
+            if (key !== 'solicitudes-compartir') {
+                await Model.deleteMany({});
+            }
             if (data.length > 0) {
                 await Model.insertMany(data);
             }
