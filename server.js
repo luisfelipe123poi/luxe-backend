@@ -198,12 +198,13 @@ app.get('/api/:key', async (req, res) => {
     }
 });
 
-// POST Adaptativo para Colecciones (Inyecta automáticamente el adminId si viene por query params)
+// POST Adaptativo para Colecciones (Inyecta automáticamente o asigna un fallback si falta)
 app.post('/api/:key', async (req, res) => {
     try {
         const { key } = req.params;
         const data = req.body;
-        const queryAdminId = req.query.adminId;
+        // Si viene por query o por headers/body, úsalo; si no, usa 'general' o 'sin-asignar'
+        const queryAdminId = req.query.adminId || req.headers['x-admin-id'];
 
         const Model = modelsMap[key];
         if (!Model) {
@@ -223,20 +224,21 @@ app.post('/api/:key', async (req, res) => {
             }
             if (data.length > 0) {
                 const nuevosDatos = data.map(item => {
-                    if (queryAdminId && !item.adminId) {
-                        return { ...item, adminId: queryAdminId };
-                    }
-                    return item;
+                    return {
+                        ...item,
+                        adminId: item.adminId || queryAdminId || 'admin_general'
+                    };
                 });
                 await Model.insertMany(nuevosDatos);
             }
             return res.json({ success: true, count: data.length });
         } else {
-            // Inserción individual: Asegura que el adminId quede registrado obligatoriamente
-            const itemData = { ...data };
-            if (queryAdminId && !itemData.adminId) {
-                itemData.adminId = queryAdminId;
-            }
+            // Inserción individual: Forzar adminId obligatoriamente
+            const itemData = { 
+                ...data,
+                adminId: data.adminId || queryAdminId || 'admin_general' 
+            };
+            
             const nuevoItem = new Model(itemData);
             await nuevoItem.save();
             return res.json(nuevoItem);
