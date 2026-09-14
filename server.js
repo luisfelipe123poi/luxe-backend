@@ -198,7 +198,7 @@ app.get('/api/:key', async (req, res) => {
     }
 });
 
-// POST Adaptativo para Colecciones (Soporta reemplazo masivo de arrays o inserción individual)
+// POST Adaptativo para Colecciones (Soporta reemplazo masivo de arrays o inserción individual devolviendo el objeto creado)
 app.post('/api/:key', async (req, res) => {
     try {
         const { key } = req.params;
@@ -219,10 +219,10 @@ app.post('/api/:key', async (req, res) => {
             }
             return res.json({ success: true, count: data.length });
         } else {
-            // Inserción o actualización de un documento individual
+            // Inserción o actualización de un documento individual devolviendo el documento completo con su _id de MongoDB
             const nuevoItem = new Model(data);
             await nuevoItem.save();
-            return res.json({ success: true, data: nuevoItem });
+            return res.json(nuevoItem);
         }
     } catch (error) {
         return res.status(500).json({ error: true, message: error.message });
