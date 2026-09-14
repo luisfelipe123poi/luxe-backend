@@ -156,7 +156,7 @@ app.post('/api/solicitudes-compartir/:id/responder', async (req, res) => {
 
 // --- FIN ENDPOINTS ESPECÍFICOS ---
 
-// GET Adaptativo por Colección Especifica
+// GET Adaptativo por Colección Especifica (Filtra por adminId si es provisto, incluyendo ruta y programacion)
 app.get('/api/:key', async (req, res) => {
     const { key } = req.params;
     console.log(`[API REQUEST] Solicitando colección: ${key}`);
@@ -186,7 +186,7 @@ app.get('/api/:key', async (req, res) => {
         const items = await Model.find(queryFilter).exec();
 
         if (!items || items.length === 0) {
-            console.log(`[API INFO] Colección '${key}' vacía, retornando []`);
+            console.log(`[API INFO] Colección '${key}' vacía o sin registros para este filtro, retornando []`);
             return res.json([]);
         }
 
@@ -198,7 +198,7 @@ app.get('/api/:key', async (req, res) => {
     }
 });
 
-// POST Adaptativo para Colecciones (Soporta reemplazo masivo de arrays o inserción individual devolviendo el objeto creado)
+// POST Adaptativo para Colecciones (Soporta reemplazo masivo protegido por adminId para ruta y programacion, o inserción individual)
 app.post('/api/:key', async (req, res) => {
     try {
         const { key } = req.params;
@@ -210,9 +210,16 @@ app.post('/api/:key', async (req, res) => {
         }
 
         if (Array.isArray(data)) {
-            // Reemplazo completo de la colección si el cliente envía un arreglo completo (excepto solicitudes)
+            // Reemplazo completo de la colección de manera segura para evitar borrar datos de otros administradores
             if (key !== 'solicitudes-compartir') {
-                await Model.deleteMany({});
+                const adminId = req.query.adminId || (data.length > 0 ? data[0].adminId : null);
+                if (adminId) {
+                    await Model.deleteMany({ adminId });
+                } else if (key !== 'ruta' && key !== 'programacion') {
+                    await Model.deleteMany({});
+                } else {
+                    await Model.deleteMany({ adminId: { $exists: false } });
+                }
             }
             if (data.length > 0) {
                 await Model.insertMany(data);
@@ -283,7 +290,7 @@ app.patch('/api/:key/:id', async (req, res) => {
     }
 });
 
-// DELETE Específico por ID (Ideal para eliminar registros individuales como empleadas, propiedades, etc.)
+// DELETE Específico por ID (Ideal para eliminar registros individuales como empleadas, propiedades, rutas, programaciones, etc.)
 app.delete('/api/:key/:id', async (req, res) => {
     try {
         const { key, id } = req.params;
