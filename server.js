@@ -132,12 +132,14 @@ async function sincronizarCalendariosIcal() {
 // Ejecutar sincronización iCal automáticamente cada 3 horas en segundo plano
 setInterval(sincronizarCalendariosIcal, 3 * 60 * 60 * 1000);
 
-// Endpoint manual para forzar la sincronización iCal desde el panel (POST)
-app.post('/api/sincronizar-ical', async (req, res) => {
+// Endpoint universal para forzar la sincronización iCal desde el panel (soporta GET y POST)
+app.all('/api/sincronizar-ical', async (req, res) => {
+    console.log(`📥 ¡Petición ${req.method} recibida para sincronizar iCal manualmente!`);
     try {
         await sincronizarCalendariosIcal();
         return res.json({ success: true, message: 'Sincronización iCal ejecutada correctamente' });
     } catch (e) {
+        console.error("❌ Error en endpoint sincronizar-ical:", e.message);
         return res.status(500).json({ success: false, message: e.message });
     }
 });
@@ -409,18 +411,6 @@ app.delete('/api/:key/:id', async (req, res) => {
         return res.json({ success: true });
     } catch (error) {
         return res.status(500).json({ error: true, message: error.message });
-    }
-});
-
-// Endpoint GET para sincronizar iCal manualmente desde el botón del frontend
-app.get('/api/sincronizar-ical', async (req, res) => {
-    console.log("📥 ¡Petición GET recibida para sincronizar iCal manualmente!");
-    try {
-        await sincronizarCalendariosIcal();
-        return res.json({ success: true, message: 'Sincronización iCal ejecutada correctamente' });
-    } catch (e) {
-        console.error("❌ Error en endpoint sincronizar-ical:", e.message);
-        return res.status(500).json({ success: false, message: e.message });
     }
 });
 
