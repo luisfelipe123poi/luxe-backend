@@ -30,6 +30,7 @@ const Prospecto = createModuleModel('Prospecto', 'prospectos');
 const Empleada = createModuleModel('Empleada', 'empleadas');
 const Administrador = createModuleModel('Administrador', 'administradores');
 const Tarea = createModuleModel('Tarea', 'tareas');
+const TareaIcal = createModuleModel('TareaIcal', 'tareas-ical'); // Nueva colección exclusiva para iCal
 const ReporteInspeccion = createModuleModel('ReporteInspeccion', 'reportes-inspeccion');
 const Lavanderia = createModuleModel('Lavanderia', 'lavanderia');
 const Faltante = createModuleModel('Faltante', 'faltantes');
@@ -45,6 +46,7 @@ const modelsMap = {
     'empleadas': Empleada,
     'administradores': Administrador,
     'tareas': Tarea,
+    'tareas-ical': TareaIcal, // Mapeo de la nueva sección
     'reportes-inspeccion': ReporteInspeccion,
     'lavanderia': Lavanderia,
     'faltantes': Faltante,
@@ -54,7 +56,7 @@ const modelsMap = {
     'fianzas': Fianza
 };
 
-// --- FUNCIÓN DE SINCRONIZACIÓN AUTOMÁTICA iCal (ESTILO TURNO) ---
+// --- FUNCIÓN DE SINCRONIZACIÓN AUTOMÁTICA iCal (NUEVA SECCIÓN GLOBAL) ---
 async function sincronizarCalendariosIcal() {
     console.log("🔄 Iniciando sincronización automática de calendarios iCal...");
     try {
@@ -87,11 +89,11 @@ async function sincronizarCalendariosIcal() {
                             const fechaSalida = new Date(ev.end);
                             fechaSalida.setHours(0, 0, 0, 0);
 
-                            // Si el huésped sale mañana, se programa limpieza automáticamente
+                            // Si el huésped sale mañana, se crea la tarea en la sección global iCal
                             if (fechaSalida.getTime() === maniana.getTime()) {
                                 
-                                // Verificar si ya existe una tarea para esta propiedad en esta fecha
-                                const tareaExistente = await Tarea.findOne({
+                                // Verificar si ya existe una tarea iCal para esta propiedad en esta fecha
+                                const tareaExistente = await TareaIcal.findOne({
                                     propiedadId: prop._id.toString(),
                                     fecha: {
                                         $gte: maniana,
@@ -101,19 +103,20 @@ async function sincronizarCalendariosIcal() {
 
                                 if (!tareaExistente) {
                                     const nombrePropiedad = prop.nombre || 'Propiedad';
-                                    const nuevaTarea = new Tarea({
-                                        adminId: prop.adminId,
+                                    const nuevaTareaIcal = new TareaIcal({
+                                        adminId: prop.adminId || 'global',
                                         propiedadId: prop._id.toString(),
                                         propiedadNombre: nombrePropiedad,
-                                        tipo: 'limpieza_salida',
+                                        tipo: 'limpieza_salida_ical',
                                         estado: 'pendiente',
-                                        descripcion: `🧹 Limpieza de salida para [${nombrePropiedad}] - Reserva: (${ev.summary || 'Reserva Externa'})`,
+                                        descripcion: `🧹 Limpieza iCal de salida para [${nombrePropiedad}] - Reserva: (${ev.summary || 'Reserva Externa'})`,
                                         fecha: maniana,
-                                        empleadaId: null
+                                        empleadaId: null,
+                                        origen: 'iCal Automático'
                                     });
 
-                                    await nuevaTarea.save();
-                                    console.log(`✨ Tarea de limpieza creada automáticamente para: ${nombrePropiedad}`);
+                                    await nuevaTareaIcal.save();
+                                    console.log(`✨ Tarea iCal creada en la nueva sección para: ${nombrePropiedad}`);
                                 }
                             }
                         }
@@ -264,13 +267,13 @@ app.get('/api/:key', async (req, res) => {
             return res.status(404).json({ error: true, message: `Ruta /api/${key} inexistente` });
         }
 
-        // Filtros dinámicos basados en query parameters (Excluyendo administradores del filtro por adminId)
+        // Filtros dinámicos (Excluyendo administradores y tareas-ical del filtro estricto por adminId para que sean globales)
         const queryFilter = {};
         if (key === 'solicitudes-compartir') {
             if (req.query.paraAdminId) queryFilter.paraAdminId = req.query.paraAdminId;
             if (req.query.estado) queryFilter.estado = req.query.estado;
             if (req.query.deAdminId) queryFilter.deAdminId = req.query.deAdminId;
-        } else if (req.query.adminId && key !== 'administradores') {
+        } else if (req.query.adminId && key !== 'administradores' && key !== 'tareas-ical') {
             queryFilter.adminId = req.query.adminId;
         }
 
@@ -289,7 +292,7 @@ app.get('/api/:key', async (req, res) => {
     }
 });
 
-// POST Adaptativo para Colecciones (Exige adminId solo en colecciones operativas, exceptuando administradores)
+// POST Adaptativo para Colecciones
 app.post('/api/:key', async (req, res) => {
     try {
         const { key } = req.params;
@@ -302,7 +305,7 @@ app.post('/api/:key', async (req, res) => {
         }
 
         if (Array.isArray(data)) {
-            if (key !== 'solicitudes-compartir' && key !== 'administradores') {
+            if (key !== 'solicitudes-compartir' && key !== 'administradores' && key !== 'tareas-ical') {
                 const adminId = queryAdminId || (data.length > 0 ? data[0].adminId : null);
                 if (!adminId) {
                     return res.status(400).json({ error: true, message: 'Se requiere un adminId válido para procesar esta operación por lotes.' });
@@ -312,7 +315,7 @@ app.post('/api/:key', async (req, res) => {
             if (data.length > 0) {
                 const nuevosDatos = data.map(item => {
                     const resolvedAdminId = item.adminId || queryAdminId;
-                    if (!resolvedAdminId && key !== 'administradores') {
+                    if (!resolvedAdminId && key !== 'administradores' && key !== 'tareas-ical') {
                         throw new Error('Elemento sin adminId válido asignado.');
                     }
                     return {
@@ -326,7 +329,7 @@ app.post('/api/:key', async (req, res) => {
         } else {
             // Inserción individual
             const resolvedAdminId = data.adminId || queryAdminId;
-            if (!resolvedAdminId && key !== 'administradores') {
+            if (!resolvedAdminId && key !== 'administradores' && key !== 'tareas-ical') {
                 return res.status(400).json({ error: true, message: 'Falta el adminId obligatorio para guardar este registro.' });
             }
 
