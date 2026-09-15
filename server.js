@@ -181,6 +181,95 @@ async function sincronizarCalendariosIcal() {
     }
 }
 
+// Almacenar las referencias de los temporizadores activos para limpiarlos si cambian
+let timersActivos = [];
+
+function limpiarTimersAnteriores() {
+    timersActivos.forEach(timer => clearTimeout(timer));
+    timersActivos = [];
+}
+
+// Función que lee la programación/rutas del día una sola vez y programa las alertas
+async function programarAlertasDelDia() {
+    try {
+        if (mongoose.connection.readyState !== 1) return;
+
+        console.log("⏰ Calculando y programando las alertas exactas del día...");
+        limpiarTimersAnteriores();
+
+        const ahora = new Date();
+
+        // 1. Buscar Programaciones pendientes
+        const programaciones = await Programacion.find({ estado: { $ne: 'completado' } });
+
+        programaciones.forEach(prog => {
+            if (prog.hora) { // Asumiendo formato "HH:mm" (ej. "14:30")
+                const [horas, minutos] = prog.hora.split(':');
+                const fechaAlerta = new Date();
+                fechaAlerta.setHours(parseInt(horas, 10), parseInt(minutos, 10), 0, 0);
+
+                const milisegundosHastaAlerta = fechaAlerta.getTime() - ahora.getTime();
+
+                // Si la hora aún no ha pasado hoy, programamos el "despertador" exacto
+                if (milisegundosHastaAlerta > 0) {
+                    const timerId = setTimeout(async () => {
+                        const mensaje = `⏰ *¡Recordatorio de Programación!* \n\n` +
+                                        `📋 Actividad: *${prog.descripcion || prog.titulo || 'Sin descripción'}*\n` +
+                                        `🕒 Hora programada: *${prog.hora}*\n\n` +
+                                        `_Es hora de poner en marcha esta tarea._`;
+
+                        await enviarAlertaTelegram(mensaje);
+                        
+                        // Marcar como enviada en la BD para que no se repita
+                        await Programacion.findByIdAndUpdate(prog._id, { $set: { alertaEnviada: true } });
+                    }, milisegundosHastaAlerta);
+
+                    timersActivos.push(timerId);
+                }
+            }
+        });
+
+        // 2. Hacer lo mismo para las Rutas
+        const rutas = await Ruta.find({ estado: { $ne: 'completado' } });
+
+        rutas.forEach(ruta => {
+            const horaRuta = ruta.horaSalida || ruta.hora;
+            if (horaRuta) {
+                const [horas, minutos] = horaRuta.split(':');
+                const fechaAlertaRuta = new Date();
+                fechaAlertaRuta.setHours(parseInt(horas, 10), parseInt(minutos, 10), 0, 0);
+
+                const msHastaRuta = fechaAlertaRuta.getTime() - ahora.getTime();
+
+                if (msHastaRuta > 0) {
+                    const timerId = setTimeout(async () => {
+                        const mensajeRuta = `🚗 *¡Alerta de Ruta Programada!* \n\n` +
+                                            `📍 Destino: *${ruta.destino || ruta.nombre || 'Ruta activa'}*\n` +
+                                            `🕒 Hora de salida: *${horaRuta}*\n\n` +
+                                            `_Prepárate para la salida de la ruta._`;
+
+                        await enviarAlertaTelegram(mensajeRuta);
+                        await Ruta.findByIdAndUpdate(ruta._id, { $set: { alertaEnviada: true } });
+                    }, msHastaRuta);
+
+                    timersActivos.push(timerId);
+                }
+            }
+        });
+
+        console.log(`✅ Se han programado ${timersActivos.length} alertas exactas en segundo plano para hoy.`);
+
+    } catch (error) {
+        console.error("❌ Error programando las alertas del día:", error.message);
+    }
+}
+
+// 🔄 Ejecutar esto UNA SOLA VEZ cuando enciende el servidor
+programarAlertasDelDia();
+
+// 🔄 Y repetirlo para refrescar la lista de tareas/rutas 2 veces al día (ej: cada 12 horas)
+setInterval(programarAlertasDelDia, 12 * 60 * 60 * 1000);
+
 // Ejecutar sincronización iCal automáticamente cada 3 horas en segundo plano
 // Ejecutar sincronización iCal automáticamente cada 3 minutos en segundo plano
 setInterval(sincronizarCalendariosIcal, 3 * 60 * 1000);
@@ -472,6 +561,8 @@ app.delete('/api/:key/:id', async (req, res) => {
         return res.status(500).json({ error: true, message: error.message });
     }
 });
+
+
 
 // Manejo final de rutas no encontradas bajo /api
 app.use('/api/*', (req, res) => {
