@@ -55,7 +55,6 @@ const modelsMap = {
 app.get('/api/test-db', async (req, res) => {
     try {
         const estadoMongo = mongoose.connection.readyState;
-        // 0: desconectado, 1: conectado, 2: conectando, 3: desconectando
         if (estadoMongo !== 1) {
             return res.status(500).json({ status: 'error', message: 'Mongo no está listo', state: estadoMongo });
         }
@@ -116,7 +115,6 @@ app.get('/api/actualizar-propiedad-get', async (req, res) => {
 
 // --- ENDPOINTS ESPECÍFICOS PARA SOLICITUDES DE SINCRONIZACIÓN ENTRE ADMINISTRADORES ---
 
-// Responder a una solicitud de sincronización (Aceptar e importar o Rechazar)
 app.post('/api/solicitudes-compartir/:id/responder', async (req, res) => {
     try {
         const { accion, adminId } = req.body;
@@ -131,7 +129,7 @@ app.post('/api/solicitudes-compartir/:id/responder', async (req, res) => {
             const items = solicitud.items || [];
             const nuevosItems = items.map(item => {
                 const newItemObj = { ...item };
-                delete newItemObj._id; // Limpiar ID anterior para evitar duplicados
+                delete newItemObj._id; 
                 newItemObj.adminId = adminId;
                 newItemObj.copiadoDe = solicitud.deAdminId;
                 return newItemObj;
@@ -156,7 +154,7 @@ app.post('/api/solicitudes-compartir/:id/responder', async (req, res) => {
 
 // --- FIN ENDPOINTS ESPECÍFICOS ---
 
-// GET Adaptativo por Colección Especifica (Filtra por adminId obligatoriamente en colecciones críticas)
+// GET Adaptativo por Colección Especifica
 app.get('/api/:key', async (req, res) => {
     const { key } = req.params;
     console.log(`[API REQUEST] Solicitando colección: ${key}`);
@@ -173,13 +171,13 @@ app.get('/api/:key', async (req, res) => {
             return res.status(404).json({ error: true, message: `Ruta /api/${key} inexistente` });
         }
 
-        // Filtros dinámicos basados en query parameters
+        // Filtros dinámicos basados en query parameters (Excluyendo administradores del filtro por adminId)
         const queryFilter = {};
         if (key === 'solicitudes-compartir') {
             if (req.query.paraAdminId) queryFilter.paraAdminId = req.query.paraAdminId;
             if (req.query.estado) queryFilter.estado = req.query.estado;
             if (req.query.deAdminId) queryFilter.deAdminId = req.query.deAdminId;
-        } else if (req.query.adminId) {
+        } else if (req.query.adminId && key !== 'administradores') {
             queryFilter.adminId = req.query.adminId;
         }
 
@@ -198,7 +196,7 @@ app.get('/api/:key', async (req, res) => {
     }
 });
 
-// POST Adaptativo para Colecciones (Exige adminId real y banea el uso de admin_general)
+// POST Adaptativo para Colecciones (Exige adminId solo en colecciones operativas, exceptuando administradores)
 app.post('/api/:key', async (req, res) => {
     try {
         const { key } = req.params;
@@ -211,7 +209,7 @@ app.post('/api/:key', async (req, res) => {
         }
 
         if (Array.isArray(data)) {
-            if (key !== 'solicitudes-compartir') {
+            if (key !== 'solicitudes-compartir' && key !== 'administradores') {
                 const adminId = queryAdminId || (data.length > 0 ? data[0].adminId : null);
                 if (!adminId) {
                     return res.status(400).json({ error: true, message: 'Se requiere un adminId válido para procesar esta operación por lotes.' });
@@ -221,27 +219,27 @@ app.post('/api/:key', async (req, res) => {
             if (data.length > 0) {
                 const nuevosDatos = data.map(item => {
                     const resolvedAdminId = item.adminId || queryAdminId;
-                    if (!resolvedAdminId) {
+                    if (!resolvedAdminId && key !== 'administradores') {
                         throw new Error('Elemento sin adminId válido asignado.');
                     }
                     return {
                         ...item,
-                        adminId: resolvedAdminId
+                        ...(resolvedAdminId ? { adminId: resolvedAdminId } : {})
                     };
                 });
                 await Model.insertMany(nuevosDatos);
             }
             return res.json({ success: true, count: data.length });
         } else {
-            // Inserción individual: Exigir obligatoriamente el adminId real sin caer en generales
+            // Inserción individual
             const resolvedAdminId = data.adminId || queryAdminId;
-            if (!resolvedAdminId) {
+            if (!resolvedAdminId && key !== 'administradores') {
                 return res.status(400).json({ error: true, message: 'Falta el adminId obligatorio para guardar este registro.' });
             }
 
             const itemData = { 
                 ...data,
-                adminId: resolvedAdminId 
+                ...(resolvedAdminId ? { adminId: resolvedAdminId } : {})
             };
             
             const nuevoItem = new Model(itemData);
@@ -253,7 +251,7 @@ app.post('/api/:key', async (req, res) => {
     }
 });
 
-// PUT Adaptativo por Colección y ID (Para actualización completa o reemplazo por ID)
+// PUT Adaptativo por Colección y ID
 app.put('/api/:key/:id', async (req, res) => {
     try {
         const { key, id } = req.params;
@@ -280,7 +278,7 @@ app.put('/api/:key/:id', async (req, res) => {
     }
 });
 
-// PATCH Adaptativo por Colección y ID (Para actualizar registros individuales como reportes, tareas, etc.)
+// PATCH Adaptativo por Colección y ID
 app.patch('/api/:key/:id', async (req, res) => {
     try {
         const { key, id } = req.params;
@@ -307,7 +305,7 @@ app.patch('/api/:key/:id', async (req, res) => {
     }
 });
 
-// DELETE Específico por ID (Ideal para eliminar registros individuales como empleadas, propiedades, rutas, programaciones, etc.)
+// DELETE Específico por ID
 app.delete('/api/:key/:id', async (req, res) => {
     try {
         const { key, id } = req.params;
