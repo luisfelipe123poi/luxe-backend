@@ -156,7 +156,7 @@ app.post('/api/solicitudes-compartir/:id/responder', async (req, res) => {
 
 // --- FIN ENDPOINTS ESPECÍFICOS ---
 
-// GET Adaptativo por Colección Especifica (Filtra por adminId si es provisto, incluyendo ruta y programacion)
+// GET Adaptativo por Colección Especifica (Filtra por adminId obligatoriamente en colecciones críticas)
 app.get('/api/:key', async (req, res) => {
     const { key } = req.params;
     console.log(`[API REQUEST] Solicitando colección: ${key}`);
@@ -198,12 +198,11 @@ app.get('/api/:key', async (req, res) => {
     }
 });
 
-// POST Adaptativo para Colecciones (Inyecta automáticamente o asigna un fallback si falta)
+// POST Adaptativo para Colecciones (Exige adminId real y banea el uso de admin_general)
 app.post('/api/:key', async (req, res) => {
     try {
         const { key } = req.params;
         const data = req.body;
-        // Si viene por query o por headers/body, úsalo; si no, usa 'general' o 'sin-asignar'
         const queryAdminId = req.query.adminId || req.headers['x-admin-id'];
 
         const Model = modelsMap[key];
@@ -214,29 +213,35 @@ app.post('/api/:key', async (req, res) => {
         if (Array.isArray(data)) {
             if (key !== 'solicitudes-compartir') {
                 const adminId = queryAdminId || (data.length > 0 ? data[0].adminId : null);
-                if (adminId) {
-                    await Model.deleteMany({ adminId });
-                } else if (key !== 'ruta' && key !== 'programacion') {
-                    await Model.deleteMany({});
-                } else {
-                    await Model.deleteMany({ adminId: { $exists: false } });
+                if (!adminId) {
+                    return res.status(400).json({ error: true, message: 'Se requiere un adminId válido para procesar esta operación por lotes.' });
                 }
+                await Model.deleteMany({ adminId });
             }
             if (data.length > 0) {
                 const nuevosDatos = data.map(item => {
+                    const resolvedAdminId = item.adminId || queryAdminId;
+                    if (!resolvedAdminId) {
+                        throw new Error('Elemento sin adminId válido asignado.');
+                    }
                     return {
                         ...item,
-                        adminId: item.adminId || queryAdminId || 'admin_general'
+                        adminId: resolvedAdminId
                     };
                 });
                 await Model.insertMany(nuevosDatos);
             }
             return res.json({ success: true, count: data.length });
         } else {
-            // Inserción individual: Forzar adminId obligatoriamente
+            // Inserción individual: Exigir obligatoriamente el adminId real sin caer en generales
+            const resolvedAdminId = data.adminId || queryAdminId;
+            if (!resolvedAdminId) {
+                return res.status(400).json({ error: true, message: 'Falta el adminId obligatorio para guardar este registro.' });
+            }
+
             const itemData = { 
                 ...data,
-                adminId: data.adminId || queryAdminId || 'admin_general' 
+                adminId: resolvedAdminId 
             };
             
             const nuevoItem = new Model(itemData);
