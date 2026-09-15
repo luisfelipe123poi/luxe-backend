@@ -411,6 +411,18 @@ app.delete('/api/:key/:id', async (req, res) => {
     }
 });
 
+// Endpoint GET para sincronizar iCal manualmente desde el botón del frontend
+app.get('/api/sincronizar-ical', async (req, res) => {
+    console.log("📥 ¡Petición GET recibida para sincronizar iCal manualmente!");
+    try {
+        await sincronizarCalendariosIcal();
+        return res.json({ success: true, message: 'Sincronización iCal ejecutada correctamente' });
+    } catch (e) {
+        console.error("❌ Error en endpoint sincronizar-ical:", e.message);
+        return res.status(500).json({ success: false, message: e.message });
+    }
+});
+
 // Manejo final de rutas no encontradas bajo /api
 app.use('/api/*', (req, res) => {
     res.status(404).json({ error: true, message: `Ruta ${req.originalUrl} inexistente` });
