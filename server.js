@@ -35,6 +35,7 @@ const Faltante = createModuleModel('Faltante', 'faltantes');
 const Programacion = createModuleModel('Programacion', 'programacion');
 const Ruta = createModuleModel('Ruta', 'ruta');
 const SolicitudCompartir = createModuleModel('SolicitudCompartir', 'solicitudes-compartir');
+const Fianza = createModuleModel('Fianza', 'fianzas');
 
 // Mapeo de rutas/claves a sus respectivos modelos de Mongoose
 const modelsMap = {
@@ -48,7 +49,8 @@ const modelsMap = {
     'faltantes': Faltante,
     'programacion': Programacion,
     'ruta': Ruta,
-    'solicitudes-compartir': SolicitudCompartir
+    'solicitudes-compartir': SolicitudCompartir,
+    'fianzas': Fianza
 };
 
 // Endpoint de prueba de conexión directa a la BD
