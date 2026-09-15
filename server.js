@@ -56,7 +56,7 @@ const modelsMap = {
     'fianzas': Fianza
 };
 
-// --- FUNCIÓN DE SINCRONIZACIÓN AUTOMÁTICA iCal (NUEVA SECCIÓN GLOBAL) ---
+// --- FUNCIÓN DE SINCRONIZACIÓN AUTOMÁTICA iCal (ACTUALIZADA CON DEPURACIÓN) ---
 async function sincronizarCalendariosIcal() {
     console.log("🔄 Iniciando sincronización automática de calendarios iCal...");
     try {
@@ -67,42 +67,40 @@ async function sincronizarCalendariosIcal() {
 
         // Buscar propiedades que tengan un enlace icalUrl registrado
         const propiedadesConIcal = await Propiedad.find({ icalUrl: { $exists: true, $ne: "" } });
+        console.log(`🏠 Propiedades con iCal encontradas: ${propiedadesConIcal.length}`);
 
         const hoy = new Date();
         hoy.setHours(0, 0, 0, 0);
 
-        // Definir mañana para buscar las salidas de huéspedes
-        const maniana = new Date(hoy);
-        maniana.setDate(maniana.getDate() + 1);
-
         for (let prop of propiedadesConIcal) {
             try {
                 if (!prop.icalUrl) continue;
+                console.log(`📥 Descargando iCal para: ${prop.nombre || prop._id} -> ${prop.icalUrl}`);
                 
                 // Descargar eventos del iCal de Airbnb/Booking de forma asíncrona
                 const webEvents = await ical.async.fromURL(prop.icalUrl);
+                let eventosProcesados = 0;
                 
                 for (let k in webEvents) {
                     if (webEvents.hasOwnProperty(k)) {
                         const ev = webEvents[k];
                         if (ev.type === 'VEVENT') {
+                            eventosProcesados++;
                             const fechaSalida = new Date(ev.end);
-                            fechaSalida.setHours(0, 0, 0, 0);
+                            console.log(`   📅 Evento encontrado: "${ev.summary || 'Sin título'}" | Salida original: ${ev.end} | Normalizada: ${fechaSalida.toISOString()}`);
 
-                            // Si el huésped sale mañana, se crea la tarea en la sección global iCal
-                            if (fechaSalida.getTime() === maniana.getTime()) {
+                            // CONDICIÓN FLEXIBLE PARA PRUEBAS: 
+                            // Registramos cualquier evento cuya fecha de salida sea de hoy en adelante (o quítalo temporalmente si quieres ver todas las pasadas)
+                            if (fechaSalida >= hoy) {
+                                const nombrePropiedad = prop.nombre || 'Propiedad';
                                 
-                                // Verificar si ya existe una tarea iCal para esta propiedad en esta fecha
+                                // Verificar si ya existe una tarea idéntica para evitar duplicados
                                 const tareaExistente = await TareaIcal.findOne({
                                     propiedadId: prop._id.toString(),
-                                    fecha: {
-                                        $gte: maniana,
-                                        $lt: new Date(maniana.getTime() + 24 * 60 * 60 * 1000)
-                                    }
+                                    descripcion: new RegExp(ev.summary || 'Reserva Externa', 'i')
                                 });
 
                                 if (!tareaExistente) {
-                                    const nombrePropiedad = prop.nombre || 'Propiedad';
                                     const nuevaTareaIcal = new TareaIcal({
                                         adminId: prop.adminId || 'global',
                                         propiedadId: prop._id.toString(),
@@ -110,18 +108,21 @@ async function sincronizarCalendariosIcal() {
                                         tipo: 'limpieza_salida_ical',
                                         estado: 'pendiente',
                                         descripcion: `🧹 Limpieza iCal de salida para [${nombrePropiedad}] - Reserva: (${ev.summary || 'Reserva Externa'})`,
-                                        fecha: maniana,
+                                        fecha: fechaSalida,
                                         empleadaId: null,
                                         origen: 'iCal Automático'
                                     });
 
                                     await nuevaTareaIcal.save();
-                                    console.log(`✨ Tarea iCal creada en la nueva sección para: ${nombrePropiedad}`);
+                                    console.log(`✨ Tarea iCal creada con éxito para: ${nombrePropiedad}`);
+                                } else {
+                                    console.log(`ℹ️ La tarea para esta reserva ya existía en la base de datos.`);
                                 }
                             }
                         }
                     }
                 }
+                console.log(`✅ Propiedad ${prop.nombre}: ${eventosProcesados} eventos totales evaluados.`);
             } catch (errCal) {
                 console.error(`⚠️ Error procesando iCal para la propiedad ${prop.nombre || prop._id}:`, errCal.message);
             }
