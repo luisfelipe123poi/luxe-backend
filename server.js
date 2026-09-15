@@ -57,6 +57,36 @@ const modelsMap = {
 };
 
 // --- FUNCIÓN DE SINCRONIZACIÓN AUTOMÁTICA iCal (ACTUALIZADA CON DEPURACIÓN) ---
+// Función para enviar alertas automáticas a Telegram
+async function enviarAlertaTelegram(mensaje) {
+    const token = process.env.TELEGRAM_BOT_TOKEN;
+    const chatId = process.env.TELEGRAM_CHAT_ID;
+    
+    if (!token || !chatId) {
+        console.log("⚠️ Telegram Bot Token o Chat ID no configurados en las variables de entorno.");
+        return;
+    }
+
+    try {
+        const url = `https://api.telegram.org/bot${token}/sendMessage`;
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                chat_id: chatId,
+                text: mensaje,
+                parse_mode: 'Markdown'
+            })
+        });
+        const data = await response.json();
+        if (!data.ok) {
+            console.error("❌ Error enviando mensaje a Telegram:", data.description);
+        }
+    } catch (error) {
+        console.error("❌ Error de red al enviar alerta a Telegram:", error.message);
+    }
+}
+
 async function sincronizarCalendariosIcal() {
     console.log("🔄 Iniciando sincronización automática de calendarios iCal...");
     try {
@@ -122,6 +152,17 @@ async function sincronizarCalendariosIcal() {
 
                                     await nuevaTareaIcal.save();
                                     console.log(`✨ Tarea iCal creada con éxito para: ${nombrePropiedad}`);
+
+                                    // 📱 DISPARAR ALERTA AUTOMÁTICA A TELEGRAM
+                                    const fechaFormateada = fechaSalida.toLocaleDateString('es-CO', { timeZone: 'UTC' });
+                                    const mensajeTelegram = `🧹 *¡Nueva Reserva Detectada!* \n\n` +
+                                                            `🏠 Propiedad: *${nombrePropiedad}*\n` +
+                                                            `📅 Fecha de Salida: *${fechaFormateada}*\n` +
+                                                            `🏷️ Detalle: _(${ev.summary || 'Reserva Externa'})_\n\n` +
+                                                            `_Se ha programado la limpieza automáticamente en LUXE Asset Management._`;
+                                    
+                                    await enviarAlertaTelegram(mensajeTelegram);
+
                                 } else {
                                     console.log(`ℹ️ La tarea para esta reserva ya existía en la base de datos.`);
                                 }
@@ -141,7 +182,8 @@ async function sincronizarCalendariosIcal() {
 }
 
 // Ejecutar sincronización iCal automáticamente cada 3 horas en segundo plano
-setInterval(sincronizarCalendariosIcal, 3 * 60 * 60 * 1000);
+// Ejecutar sincronización iCal automáticamente cada 3 minutos en segundo plano
+setInterval(sincronizarCalendariosIcal, 3 * 60 * 1000);
 
 // Endpoint universal para forzar la sincronización iCal desde el panel (soporta GET y POST)
 app.all('/api/sincronizar-ical', async (req, res) => {
