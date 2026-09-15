@@ -1,6 +1,7 @@
 const express = require('express');
 const mongoose = require('mongoose'); 
 const cors = require('cors');
+const ical = require('node-ical');
 
 const app = express();
 
@@ -52,6 +53,93 @@ const modelsMap = {
     'solicitudes-compartir': SolicitudCompartir,
     'fianzas': Fianza
 };
+
+// --- FUNCIÓN DE SINCRONIZACIÓN AUTOMÁTICA iCal (ESTILO TURNO) ---
+async function sincronizarCalendariosIcal() {
+    console.log("🔄 Iniciando sincronización automática de calendarios iCal...");
+    try {
+        if (mongoose.connection.readyState !== 1) {
+            console.log("⚠️ MongoDB no está conectado, omitiendo sincronización iCal por ahora.");
+            return;
+        }
+
+        // Buscar propiedades que tengan un enlace icalUrl registrado
+        const propiedadesConIcal = await Propiedad.find({ icalUrl: { $exists: true, $ne: "" } });
+
+        const hoy = new Date();
+        hoy.setHours(0, 0, 0, 0);
+
+        // Definir mañana para buscar las salidas de huéspedes
+        const maniana = new Date(hoy);
+        maniana.setDate(maniana.getDate() + 1);
+
+        for (let prop of propiedadesConIcal) {
+            try {
+                if (!prop.icalUrl) continue;
+                
+                // Descargar eventos del iCal de Airbnb/Booking de forma asíncrona
+                const webEvents = await ical.async.fromURL(prop.icalUrl);
+                
+                for (let k in webEvents) {
+                    if (webEvents.hasOwnProperty(k)) {
+                        const ev = webEvents[k];
+                        if (ev.type === 'VEVENT') {
+                            const fechaSalida = new Date(ev.end);
+                            fechaSalida.setHours(0, 0, 0, 0);
+
+                            // Si el huésped sale mañana, se programa limpieza automáticamente
+                            if (fechaSalida.getTime() === maniana.getTime()) {
+                                
+                                // Verificar si ya existe una tarea para esta propiedad en esta fecha
+                                const tareaExistente = await Tarea.findOne({
+                                    propiedadId: prop._id.toString(),
+                                    fecha: {
+                                        $gte: maniana,
+                                        $lt: new Date(maniana.getTime() + 24 * 60 * 60 * 1000)
+                                    }
+                                });
+
+                                if (!tareaExistente) {
+                                    const nuevaTarea = new Tarea({
+                                        adminId: prop.adminId,
+                                        propiedadId: prop._id.toString(),
+                                        propiedadNombre: prop.nombre || 'Propiedad',
+                                        tipo: 'limpieza_salida',
+                                        estado: 'pendiente',
+                                        descripcion: `Limpieza automática por check-out (${ev.summary || 'Reserva Externa'})`,
+                                        fecha: maniana,
+                                        empleadaId: null
+                                    });
+
+                                    await nuevaTarea.save();
+                                    console.log(`✨ Tarea de limpieza creada automáticamente para: ${prop.nombre}`);
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (errCal) {
+                console.error(`⚠️ Error procesando iCal para la propiedad ${prop.nombre || prop._id}:`, errCal.message);
+            }
+        }
+        console.log("✅ Sincronización iCal finalizada con éxito.");
+    } catch (error) {
+        console.error("🔴 Error general en sincronización iCal:", error.message);
+    }
+}
+
+// Ejecutar sincronización iCal automáticamente cada 3 horas en segundo plano
+setInterval(sincronizarCalendariosIcal, 3 * 60 * 60 * 1000);
+
+// Endpoint manual para forzar la sincronización iCal desde el panel
+app.post('/api/sincronizar-ical', async (req, res) => {
+    try {
+        await sincronizarCalendariosIcal();
+        return res.json({ success: true, message: 'Sincronización iCal ejecutada correctamente' });
+    } catch (e) {
+        return res.status(500).json({ success: false, message: e.message });
+    }
+});
 
 // Endpoint de prueba de conexión directa a la BD
 app.get('/api/test-db', async (req, res) => {
