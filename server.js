@@ -65,8 +65,14 @@ async function sincronizarCalendariosIcal() {
             return;
         }
 
-        // Buscar propiedades que tengan un enlace icalUrl registrado
-        const propiedadesConIcal = await Propiedad.find({ icalUrl: { $exists: true, $ne: "" } });
+        // Buscar propiedades que tengan un enlace icalUrl registrado (admite variaciones comunes por seguridad)
+        const propiedadesConIcal = await Propiedad.find({
+            $or: [
+                { icalUrl: { $exists: true, $ne: "" } },
+                { urlIcal: { $exists: true, $ne: "" } }
+            ]
+        });
+        
         console.log(`🏠 Propiedades con iCal encontradas: ${propiedadesConIcal.length}`);
 
         const hoy = new Date();
@@ -74,11 +80,13 @@ async function sincronizarCalendariosIcal() {
 
         for (let prop of propiedadesConIcal) {
             try {
-                if (!prop.icalUrl) continue;
-                console.log(`📥 Descargando iCal para: ${prop.nombre || prop._id} -> ${prop.icalUrl}`);
+                const enlaceIcal = prop.icalUrl || prop.urlIcal;
+                if (!enlaceIcal) continue;
+                
+                console.log(`📥 Descargando iCal para: ${prop.nombre || prop._id} -> ${enlaceIcal}`);
                 
                 // Descargar eventos del iCal de Airbnb/Booking de forma asíncrona
-                const webEvents = await ical.async.fromURL(prop.icalUrl);
+                const webEvents = await ical.async.fromURL(enlaceIcal);
                 let eventosProcesados = 0;
                 
                 for (let k in webEvents) {
@@ -89,8 +97,7 @@ async function sincronizarCalendariosIcal() {
                             const fechaSalida = new Date(ev.end);
                             console.log(`   📅 Evento encontrado: "${ev.summary || 'Sin título'}" | Salida original: ${ev.end} | Normalizada: ${fechaSalida.toISOString()}`);
 
-                            // CONDICIÓN FLEXIBLE PARA PRUEBAS: 
-                            // Registramos cualquier evento cuya fecha de salida sea de hoy en adelante (o quítalo temporalmente si quieres ver todas las pasadas)
+                            // Registramos cualquier evento cuya fecha de salida sea de hoy en adelante
                             if (fechaSalida >= hoy) {
                                 const nombrePropiedad = prop.nombre || 'Propiedad';
                                 
@@ -165,14 +172,17 @@ app.get('/api/test-db', async (req, res) => {
 // Ruta GET ultra-segura para actualizar por ID evitando restricciones de Nginx
 app.get('/api/update-propiedad-safe', async (req, res) => {
     try {
-        const { id, status, code } = req.query;
+        const { id, status, code, icalUrl } = req.query;
         if (!id) {
             return res.status(400).json({ success: false, message: 'ID no proporcionado' });
         }
 
+        const updateData = { status, code };
+        if (icalUrl !== undefined) updateData.icalUrl = icalUrl;
+
         const itemActualizado = await Propiedad.findByIdAndUpdate(
             id,
-            { $set: { status, code } },
+            { $set: updateData },
             { new: true, runValidators: true }
         );
 
@@ -189,14 +199,17 @@ app.get('/api/update-propiedad-safe', async (req, res) => {
 // Ruta GET de respaldo para saltar restricciones de métodos POST/PATCH bloqueados por el proxy web
 app.get('/api/actualizar-propiedad-get', async (req, res) => {
     try {
-        const { id, status, code } = req.query;
+        const { id, status, code, icalUrl } = req.query;
         if (!id) {
             return res.status(400).json({ success: false, message: 'ID no proporcionado' });
         }
 
+        const updateData = { status, code };
+        if (icalUrl !== undefined) updateData.icalUrl = icalUrl;
+
         const itemActualizado = await Propiedad.findByIdAndUpdate(
             id,
-            { $set: { status, code } },
+            { $set: updateData },
             { new: true, runValidators: true }
         );
 
@@ -293,7 +306,7 @@ app.get('/api/:key', async (req, res) => {
     }
 });
 
-// POST Adaptativo para Colecciones
+// POST Adaptativo para Colecciones (Guarda automáticamente icalUrl al crear propiedad)
 app.post('/api/:key', async (req, res) => {
     try {
         const { key } = req.params;
@@ -328,7 +341,7 @@ app.post('/api/:key', async (req, res) => {
             }
             return res.json({ success: true, count: data.length });
         } else {
-            // Inserción individual
+            // Inserción individual (Guarda cualquier campo flexible como icalUrl)
             const resolvedAdminId = data.adminId || queryAdminId;
             if (!resolvedAdminId && key !== 'administradores' && key !== 'tareas-ical') {
                 return res.status(400).json({ error: true, message: 'Falta el adminId obligatorio para guardar este registro.' });
