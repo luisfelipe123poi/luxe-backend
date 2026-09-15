@@ -100,19 +100,20 @@ async function sincronizarCalendariosIcal() {
                                 });
 
                                 if (!tareaExistente) {
+                                    const nombrePropiedad = prop.nombre || 'Propiedad';
                                     const nuevaTarea = new Tarea({
                                         adminId: prop.adminId,
                                         propiedadId: prop._id.toString(),
-                                        propiedadNombre: prop.nombre || 'Propiedad',
+                                        propiedadNombre: nombrePropiedad,
                                         tipo: 'limpieza_salida',
                                         estado: 'pendiente',
-                                        descripcion: `Limpieza automática por check-out (${ev.summary || 'Reserva Externa'})`,
+                                        descripcion: `🧹 Limpieza de salida para [${nombrePropiedad}] - Reserva: (${ev.summary || 'Reserva Externa'})`,
                                         fecha: maniana,
                                         empleadaId: null
                                     });
 
                                     await nuevaTarea.save();
-                                    console.log(`✨ Tarea de limpieza creada automáticamente para: ${prop.nombre}`);
+                                    console.log(`✨ Tarea de limpieza creada automáticamente para: ${nombrePropiedad}`);
                                 }
                             }
                         }
@@ -131,30 +132,12 @@ async function sincronizarCalendariosIcal() {
 // Ejecutar sincronización iCal automáticamente cada 3 horas en segundo plano
 setInterval(sincronizarCalendariosIcal, 3 * 60 * 60 * 1000);
 
-
-// ==========================================
-// --- ENDPOINTS ESPECÍFICOS (DEBEN IR ARRIBA) ---
-// ==========================================
-
-// Endpoint GET y POST para sincronizar iCal manualmente desde el panel (Soporta ambos métodos)
-app.get('/api/sincronizar-ical', async (req, res) => {
-    console.log("📥 ¡Petición GET recibida para sincronizar iCal manualmente!");
-    try {
-        await sincronizarCalendariosIcal();
-        return res.json({ success: true, message: 'Sincronización iCal ejecutada correctamente' });
-    } catch (e) {
-        console.error("❌ Error en endpoint sincronizar-ical:", e.message);
-        return res.status(500).json({ success: false, message: e.message });
-    }
-});
-
+// Endpoint manual para forzar la sincronización iCal desde el panel (POST)
 app.post('/api/sincronizar-ical', async (req, res) => {
-    console.log("📥 ¡Petición POST recibida para sincronizar iCal manualmente!");
     try {
         await sincronizarCalendariosIcal();
         return res.json({ success: true, message: 'Sincronización iCal ejecutada correctamente' });
     } catch (e) {
-        console.error("❌ Error en endpoint sincronizar-ical:", e.message);
         return res.status(500).json({ success: false, message: e.message });
     }
 });
@@ -221,7 +204,8 @@ app.get('/api/actualizar-propiedad-get', async (req, res) => {
     }
 });
 
-// Solicitudes de sincronización entre administradores
+// --- ENDPOINTS ESPECÍFICOS PARA SOLICITUDES DE SINCRONIZACIÓN ENTRE ADMINISTRADORES ---
+
 app.post('/api/solicitudes-compartir/:id/responder', async (req, res) => {
     try {
         const { accion, adminId } = req.body;
@@ -261,12 +245,7 @@ app.post('/api/solicitudes-compartir/:id/responder', async (req, res) => {
 
 // --- FIN ENDPOINTS ESPECÍFICOS ---
 
-
-// ==========================================
-// --- RUTAS DINÁMICAS GENERALES (VAN ABAJO) ---
-// ==========================================
-
-// GET Adaptativo por Colección Específica
+// GET Adaptativo por Colección Especifica
 app.get('/api/:key', async (req, res) => {
     const { key } = req.params;
     console.log(`[API REQUEST] Solicitando colección: ${key}`);
@@ -283,7 +262,7 @@ app.get('/api/:key', async (req, res) => {
             return res.status(404).json({ error: true, message: `Ruta /api/${key} inexistente` });
         }
 
-        // Filtros dinámicos basados en query parameters
+        // Filtros dinámicos basados en query parameters (Excluyendo administradores del filtro por adminId)
         const queryFilter = {};
         if (key === 'solicitudes-compartir') {
             if (req.query.paraAdminId) queryFilter.paraAdminId = req.query.paraAdminId;
@@ -296,9 +275,11 @@ app.get('/api/:key', async (req, res) => {
         const items = await Model.find(queryFilter).exec();
 
         if (!items || items.length === 0) {
+            console.log(`[API INFO] Colección '${key}' vacía o sin registros para este filtro, retornando []`);
             return res.json([]);
         }
 
+        console.log(`[API SUCCESS] Colección '${key}' enviada con éxito.`);
         return res.json(items);
     } catch (error) {
         console.error(`[API FATAL] Error procesando '${key}':`, error.message);
@@ -306,7 +287,7 @@ app.get('/api/:key', async (req, res) => {
     }
 });
 
-// POST Adaptativo para Colecciones
+// POST Adaptativo para Colecciones (Exige adminId solo en colecciones operativas, exceptuando administradores)
 app.post('/api/:key', async (req, res) => {
     try {
         const { key } = req.params;
@@ -341,6 +322,7 @@ app.post('/api/:key', async (req, res) => {
             }
             return res.json({ success: true, count: data.length });
         } else {
+            // Inserción individual
             const resolvedAdminId = data.adminId || queryAdminId;
             if (!resolvedAdminId && key !== 'administradores') {
                 return res.status(400).json({ error: true, message: 'Falta el adminId obligatorio para guardar este registro.' });
@@ -427,6 +409,18 @@ app.delete('/api/:key/:id', async (req, res) => {
         return res.json({ success: true });
     } catch (error) {
         return res.status(500).json({ error: true, message: error.message });
+    }
+});
+
+// Endpoint GET para sincronizar iCal manualmente desde el botón del frontend
+app.get('/api/sincronizar-ical', async (req, res) => {
+    console.log("📥 ¡Petición GET recibida para sincronizar iCal manualmente!");
+    try {
+        await sincronizarCalendariosIcal();
+        return res.json({ success: true, message: 'Sincronización iCal ejecutada correctamente' });
+    } catch (e) {
+        console.error("❌ Error en endpoint sincronizar-ical:", e.message);
+        return res.status(500).json({ success: false, message: e.message });
     }
 });
 
