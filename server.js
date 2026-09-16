@@ -134,9 +134,12 @@ async function sincronizarCalendariosIcal(empresaIdFiltro = null, adminIdFiltro 
 
                             if (fechaSalida >= hoy) {
                                 const nombrePropiedad = prop.nombre || 'Propiedad';
-                                const empresaProp = prop.empresaId || null;
-                                const adminProp = prop.adminId || 'global';
                                 
+                                // OBTENER EMPRESA Y ADMIN DE LA PROPIEDAD DE FORMA SEGURA
+                                const empresaProp = prop.empresaId || empresaIdFiltro || null;
+                                const adminProp = prop.adminId || adminIdFiltro || 'global';
+                                
+                                // Búsqueda estricta que incluye propiedadId, descripción y empresaId para evitar cruces
                                 const tareaExistente = await TareaIcal.findOne({
                                     propiedadId: prop._id.toString(),
                                     descripcion: new RegExp(ev.summary || 'Reserva Externa', 'i'),
@@ -145,8 +148,8 @@ async function sincronizarCalendariosIcal(empresaIdFiltro = null, adminIdFiltro 
 
                                 if (!tareaExistente) {
                                     const nuevaTareaIcal = new TareaIcal({
-                                        empresaId: empresaProp,
-                                        adminId: adminProp,
+                                        empresaId: empresaProp,   // <--- AQUÍ SE GUARDA LA EMPRESA OBLIGATORIAMENTE
+                                        adminId: adminProp,       // <--- AQUÍ SE GUARDA EL ADMIN OBLIGATORIAMENTE
                                         propiedadId: prop._id.toString(),
                                         propiedadNombre: nombrePropiedad,
                                         tipo: 'limpieza_salida_ical',
@@ -158,7 +161,7 @@ async function sincronizarCalendariosIcal(empresaIdFiltro = null, adminIdFiltro 
                                     });
 
                                     await nuevaTareaIcal.save();
-                                    console.log(`✨ Tarea iCal creada con éxito para: ${nombrePropiedad}`);
+                                    console.log(`✨ Tarea iCal creada con éxito para: ${nombrePropiedad} (Empresa: ${empresaProp})`);
 
                                     const fechaFormateada = fechaSalida.toLocaleDateString('es-CO', { timeZone: 'UTC' });
                                     const mensajeTelegram = `🧹 *¡Nueva Reserva Detectada!* \n\n` +
