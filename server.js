@@ -60,13 +60,53 @@ const modelsMap = {
     'fianzas': Fianza
 };
 
-// --- FUNCIÓN DE SINCRONIZACIÓN AUTOMÁTICA iCal ---
+// --- FUNCIÓN DE ALERTA TELEGRAM DINÁMICA POR EMPRESA ---
+async function enviarAlertaTelegramPorEmpresa(empresaId, mensajeTelegram) {
+    try {
+        if (!empresaId) {
+            console.log("⚠️ No se proporcionó empresaId para enviar la alerta de Telegram, omitiendo...");
+            return;
+        }
+
+        const empresa = await Empresa.findById(empresaId);
+        
+        if (!empresa || !empresa.telegramToken || !empresa.telegramChatId) {
+            console.log(`ℹ️ La empresa con ID ${empresaId} no tiene configurado un bot de Telegram propio. Alerta omitida.`);
+            return;
+        }
+
+        const token = empresa.telegramToken;
+        const chatId = empresa.telegramChatId;
+        const urlTelegram = `https://api.telegram.org/bot${token}/sendMessage`;
+
+        const respuesta = await fetch(urlTelegram, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                chat_id: chatId,
+                text: mensajeTelegram,
+                parse_mode: 'Markdown'
+            })
+        });
+
+        const resultado = await respuesta.json();
+        if (!resultado.ok) {
+            console.error(`❌ Error enviando Telegram para empresa ${empresaId}:`, resultado.description);
+        } else {
+            console.log(`🚀 Alerta de Telegram enviada exitosamente al bot de la empresa ID: ${empresaId}`);
+        }
+    } catch (error) {
+        console.error("🔴 Error crítico al enviar alerta de Telegram por empresa:", error.message);
+    }
+}
+
+// Función global de Telegram de respaldo (para recordatorios generales o del sistema)
 async function enviarAlertaTelegram(mensaje) {
     const token = process.env.TELEGRAM_BOT_TOKEN;
     const chatId = process.env.TELEGRAM_CHAT_ID;
     
     if (!token || !chatId) {
-        console.log("⚠️ Telegram Bot Token o Chat ID no configurados en las variables de entorno.");
+        console.log("⚠️ Telegram Bot Token o Chat ID globales no configurados.");
         return;
     }
 
@@ -83,15 +123,16 @@ async function enviarAlertaTelegram(mensaje) {
         });
         const data = await response.json();
         if (!data.ok) {
-            console.error("❌ Error enviando mensaje a Telegram:", data.description);
+            console.error("❌ Error enviando mensaje global a Telegram:", data.description);
         }
     } catch (error) {
-        console.error("❌ Error de red al enviar alerta a Telegram:", error.message);
+        console.error("❌ Error de red al enviar alerta global a Telegram:", error.message);
     }
 }
 
+// --- FUNCIÓN DE SINCRONIZACIÓN AUTOMÁTICA iCal AISLADA ---
 async function sincronizarCalendariosIcal(empresaIdFiltro = null, adminIdFiltro = null) {
-    console.log("🔄 Iniciando sincronización automática de calendarios iCal (Multi-empresa estricta)...");
+    console.log("🔄 Iniciando sincronización automática de calendarios iCal (Multi-empresa y Bot personalizado)...");
     try {
         if (mongoose.connection.readyState !== 1) {
             console.log("⚠️ MongoDB no está conectado, omitiendo sincronización iCal por ahora.");
@@ -109,7 +150,6 @@ async function sincronizarCalendariosIcal(empresaIdFiltro = null, adminIdFiltro 
         if (adminIdFiltro) filtroQuery.adminId = adminIdFiltro;
 
         const propiedadesConIcal = await Propiedad.find(filtroQuery);
-        
         console.log(`🏠 Propiedades con iCal encontradas: ${propiedadesConIcal.length}`);
 
         const hoy = new Date();
@@ -135,11 +175,9 @@ async function sincronizarCalendariosIcal(empresaIdFiltro = null, adminIdFiltro 
                             if (fechaSalida >= hoy) {
                                 const nombrePropiedad = prop.nombre || 'Propiedad';
                                 
-                                // OBTENER EMPRESA Y ADMIN DE LA PROPIEDAD DE FORMA SEGURA
                                 const empresaProp = prop.empresaId || empresaIdFiltro || null;
                                 const adminProp = prop.adminId || adminIdFiltro || 'global';
                                 
-                                // Búsqueda estricta que incluye propiedadId, descripción y empresaId para evitar cruces
                                 const tareaExistente = await TareaIcal.findOne({
                                     propiedadId: prop._id.toString(),
                                     descripcion: new RegExp(ev.summary || 'Reserva Externa', 'i'),
@@ -148,8 +186,8 @@ async function sincronizarCalendariosIcal(empresaIdFiltro = null, adminIdFiltro 
 
                                 if (!tareaExistente) {
                                     const nuevaTareaIcal = new TareaIcal({
-                                        empresaId: empresaProp,   // <--- AQUÍ SE GUARDA LA EMPRESA OBLIGATORIAMENTE
-                                        adminId: adminProp,       // <--- AQUÍ SE GUARDA EL ADMIN OBLIGATORIAMENTE
+                                        empresaId: empresaProp,   
+                                        adminId: adminProp,       
                                         propiedadId: prop._id.toString(),
                                         propiedadNombre: nombrePropiedad,
                                         tipo: 'limpieza_salida_ical',
@@ -170,7 +208,11 @@ async function sincronizarCalendariosIcal(empresaIdFiltro = null, adminIdFiltro 
                                                             `🏷️ Detalle: _(${ev.summary || 'Reserva Externa'})_\n\n` +
                                                             `_Se ha programado la limpieza automáticamente en el sistema._`;
                                     
-                                    await enviarAlertaTelegram(mensajeTelegram);
+                                    if (empresaProp) {
+                                        await enviarAlertaTelegramPorEmpresa(empresaProp, mensajeTelegram);
+                                    } else {
+                                        console.log("⚠️ Tarea creada sin empresaId asociada, no se puede enviar al bot de Telegram.");
+                                    }
 
                                 } else {
                                     console.log(`ℹ️ La tarea para esta reserva ya existía en la base de datos.`);
@@ -224,7 +266,11 @@ async function programarAlertasDelDia() {
                                         `🕒 Hora programada: *${prog.hora}*\n\n` +
                                         `_Es hora de poner en marcha esta tarea._`;
 
-                        await enviarAlertaTelegram(mensaje);
+                        if (prog.empresaId) {
+                            await enviarAlertaTelegramPorEmpresa(prog.empresaId, mensaje);
+                        } else {
+                            await enviarAlertaTelegram(mensaje);
+                        }
                         await Programacion.findByIdAndUpdate(prog._id, { $set: { alertaEnviada: true } });
                     }, milisegundosHastaAlerta);
 
@@ -251,7 +297,11 @@ async function programarAlertasDelDia() {
                                             `🕒 Hora de salida: *${horaRuta}*\n\n` +
                                             `_Prepárate para la salida de la ruta._`;
 
-                        await enviarAlertaTelegram(mensajeRuta);
+                        if (ruta.empresaId) {
+                            await enviarAlertaTelegramPorEmpresa(ruta.empresaId, mensajeRuta);
+                        } else {
+                            await enviarAlertaTelegram(mensajeRuta);
+                        }
                         await Ruta.findByIdAndUpdate(ruta._id, { $set: { alertaEnviada: true } });
                     }, msHastaRuta);
 
@@ -300,7 +350,7 @@ app.get('/api/test-db', async (req, res) => {
     }
 });
 
-// Rutas de actualización segura por GET con validación de propiedad y empresa
+// Rutas de actualización segura por GET
 app.get('/api/update-propiedad-safe', async (req, res) => {
     try {
         const { id, status, code, icalUrl, empresaId } = req.query;
@@ -415,32 +465,28 @@ app.get('/api/:key', async (req, res) => {
 
         const queryFilter = {};
 
-        // Extracción robusta de parámetros de aislamiento (Query params o Headers)
         const empresaId = req.query.empresaId || req.headers['x-empresa-id'] || req.headers['x-company-id'];
         const adminId = req.query.adminId || req.headers['x-admin-id'];
 
-        // Aplicar filtro estricto de Empresa obligatoriamente (excepto para catálogos globales autorizados)
+        // Aplicar filtro estricto de empresa de forma obligatoria para tareas-ical y demás módulos protegidos
         if (empresaId && key !== 'empresas' && key !== 'administradores') {
             queryFilter.empresaId = empresaId;
         } else if (!empresaId && key !== 'empresas' && key !== 'administradores') {
-            // Protección: Si no se provee empresaId para colecciones protegidas, se devuelve vacío para evitar fugas de datos
             console.warn(`[API SECURITY] Petición a /api/${key} sin empresaId. Retornando vacío.`);
             return res.json([]);
         }
 
-        // Filtros específicos adicionales por colección
         if (key === 'solicitudes-compartir') {
             if (req.query.paraAdminId) queryFilter.paraAdminId = req.query.paraAdminId;
             if (req.query.estado) queryFilter.estado = req.query.estado;
             if (req.query.deAdminId) queryFilter.deAdminId = req.query.deAdminId;
         } else if (adminId && key !== 'empresas' && key !== 'administradores') {
-            queryFilter.adminId = adminId;
+            // Opcional para filtrar por admin si corresponde
         }
 
         const items = await Model.find(queryFilter).exec();
 
         if (!items || items.length === 0) {
-            console.log(`[API INFO] Colección '${key}' vacía o sin registros para este filtro, retornando []`);
             return res.json([]);
         }
 
@@ -452,7 +498,7 @@ app.get('/api/:key', async (req, res) => {
     }
 });
 
-// POST Adaptativo para Colecciones (Inyecta y asegura automáticamente empresaId y adminId)
+// POST Adaptativo para Colecciones
 app.post('/api/:key', async (req, res) => {
     try {
         const { key } = req.params;
@@ -661,15 +707,16 @@ app.post('/enviar-correo-fianza', async (req, res) => {
 
 app.post('/api/empresas/registrar-principal', async (req, res) => {
     try {
-        const { nombreEmpresa, nombreAdmin, username, password } = req.body;
+        const { nombreEmpresa, nombreAdmin, username, password, telegramToken, telegramChatId } = req.body;
 
-        // Crear la empresa guardando también las credenciales del admin principal dentro del mismo documento
         const nuevaEmpresa = new Empresa({
             nombre: nombreEmpresa,
             adminNombre: nombreAdmin,
             username: username.toLowerCase().trim(),
             password: password,
-            role: 'admin'
+            role: 'admin',
+            telegramToken: telegramToken || "",
+            telegramChatId: telegramChatId || ""
         });
 
         const empresaGuardada = await nuevaEmpresa.save();
