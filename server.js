@@ -641,36 +641,35 @@ app.post('/enviar-correo-fianza', async (req, res) => {
     }
 });
 
-// Ejemplo de ruta en el Backend (Node.js / Express)
+// Asegúrate de que tu ruta en el backend haga esto:
 app.post('/api/empresas/registrar-principal', async (req, res) => {
     try {
         const { nombreEmpresa, nombreAdmin, username, password } = req.body;
 
-        // 1. Crear la empresa principal en tu base de datos (Colección Empresas)
+        // 1. Crear y guardar la empresa principal
         const nuevaEmpresa = new Empresa({
-            nombre: nombreEmpresa,
-            fechaCreacion: new Date()
+            nombre: nombreEmpresa
         });
         const empresaGuardada = await nuevaEmpresa.save();
 
-        // 2. Crear el usuario administrador vinculado a esa empresa
+        // 2. Crear y guardar el Administrador asociado vinculado a la empresa
+        // (Verifica que tu modelo de Administrador guarde password y empresaId)
         const nuevoAdmin = new Administrador({
             nombre: nombreAdmin,
             username: username.toLowerCase().trim(),
-            password: password, // Recuerda aplicar hash a la contraseña si usas bcrypt
+            password: password, // Asegúrate de guardar el campo password aquí
             empresaId: empresaGuardada._id,
             role: 'admin'
         });
         await nuevoAdmin.save();
 
-        res.status(201).json({
+        res.status(200).json({
             success: true,
-            message: 'Empresa y administrador principal creados exitosamente',
-            empresa: empresaGuardada
+            message: 'Empresa y administrador principal creados con éxito'
         });
     } catch (error) {
         console.error("Error al registrar empresa principal:", error);
-        res.status(500).json({ success: false, message: error.message || 'Error interno del servidor' });
+        res.status(500).json({ success: false, message: error.message });
     }
 });
 
