@@ -641,6 +641,39 @@ app.post('/enviar-correo-fianza', async (req, res) => {
     }
 });
 
+// Ejemplo de ruta en el Backend (Node.js / Express)
+app.post('/api/empresas/registrar-principal', async (req, res) => {
+    try {
+        const { nombreEmpresa, nombreAdmin, username, password } = req.body;
+
+        // 1. Crear la empresa principal en tu base de datos (Colección Empresas)
+        const nuevaEmpresa = new Empresa({
+            nombre: nombreEmpresa,
+            fechaCreacion: new Date()
+        });
+        const empresaGuardada = await nuevaEmpresa.save();
+
+        // 2. Crear el usuario administrador vinculado a esa empresa
+        const nuevoAdmin = new Administrador({
+            nombre: nombreAdmin,
+            username: username.toLowerCase().trim(),
+            password: password, // Recuerda aplicar hash a la contraseña si usas bcrypt
+            empresaId: empresaGuardada._id,
+            role: 'admin'
+        });
+        await nuevoAdmin.save();
+
+        res.status(201).json({
+            success: true,
+            message: 'Empresa y administrador principal creados exitosamente',
+            empresa: empresaGuardada
+        });
+    } catch (error) {
+        console.error("Error al registrar empresa principal:", error);
+        res.status(500).json({ success: false, message: error.message || 'Error interno del servidor' });
+    }
+});
+
 // Manejo final de rutas no encontradas bajo /api
 app.use('/api/*', (req, res) => {
     res.status(404).json({ error: true, message: `Ruta ${req.originalUrl} inexistente` });
