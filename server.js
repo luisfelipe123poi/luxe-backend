@@ -562,6 +562,90 @@ app.delete('/api/:key/:id', async (req, res) => {
     }
 });
 
+// ==========================================
+// RUTA BACKEND: Enviar Correo de Fianza vía Brevo (Usando variables de entorno en Render)
+// ==========================================
+
+app.post('/enviar-correo-fianza', async (req, res) => {
+    try {
+        const { correo, huesped, propiedad, monto, link } = req.body;
+
+        if (!correo || !huesped || !link) {
+            return res.status(400).json({ error: 'Faltan datos obligatorios para el envío del correo.' });
+        }
+
+        const BREVO_API_KEY = process.env.BREVO_API_KEY;
+        const BREVO_SENDER_EMAIL = process.env.BREVO_SENDER_EMAIL || 'tucorreo@tudominio.com';
+        const BREVO_SENDER_NAME = process.env.BREVO_SENDER_NAME || 'Portal de Fianzas & Garantías';
+
+        if (!BREVO_API_KEY) {
+            console.error("Falta configurar la variable de entorno BREVO_API_KEY en el servidor.");
+            return res.status(500).json({ error: 'Configuración de correo incompleta en el servidor.' });
+        }
+
+        const payloadBrevo = {
+            sender: {
+                name: BREVO_SENDER_NAME,
+                email: BREVO_SENDER_EMAIL
+            },
+            to: [
+                {
+                    email: correo,
+                    name: huesped
+                }
+            ],
+            subject: `🛡️ Depósito de Garantía Requerido - ${propiedad}`,
+            htmlContent: `
+                <div style="font-family: Arial, sans-serif; background-color: #f4f6f8; padding: 20px; color: #333;">
+                    <div style="max-width: 600px; margin: 0 auto; background: #ffffff; padding: 30px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
+                        <h2 style="color: #0284c7; margin-top: 0;">Hola, ${huesped} 👋</h2>
+                        <p style="font-size: 15px; line-height: 1.5; color: #475569;">
+                            Te damos la bienvenida a <strong>${propiedad}</strong>. Para completar tu proceso de registro y asegurar tu estadía, requerimos que emitas el depósito de garantía correspondiente.
+                        </p>
+                        
+                        <div style="background: #f8fafc; border: 1px solid #e2e8f0; padding: 16px; border-radius: 8px; margin: 20px 0;">
+                            <p style="margin: 0 0 8px 0; font-size: 14px; color: #64748b;"><strong>Monto del depósito:</strong> $${Number(monto).toLocaleString()} USD</p>
+                            <p style="margin: 0; font-size: 14px; color: #64748b;"><strong>Estado:</strong> <span style="color: #f59e0b; font-weight: bold;">Pendiente de pago</span></p>
+                        </div>
+
+                        <div style="text-align: center; margin: 30px 0;">
+                            <a href="${link}" style="background-color: #0284c7; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 8px; font-weight: bold; display: inline-block; box-shadow: 0 4px 10px rgba(2, 132, 199, 0.2);">
+                                💳 Pagar / Registrar Garantía Segura
+                            </a>
+                        </div>
+
+                        <p style="font-size: 13px; color: #94a3b8; text-align: center; margin-top: 30px; border-top: 1px solid #f1f5f9; padding-top: 15px;">
+                            Este enlace es único y seguro. Si tienes dudas, comunícate con el administrador de la propiedad.
+                        </p>
+                    </div>
+                </div>
+            `
+        };
+
+        const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+            method: 'POST',
+            headers: {
+                'accept': 'application/json',
+                'api-key': BREVO_API_KEY,
+                'content-type': 'application/json'
+            },
+            body: JSON.stringify(payloadBrevo)
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            console.error("Error de la API de Brevo:", data);
+            return res.status(500).json({ error: 'Error al enviar el correo a través de Brevo', detalle: data });
+        }
+
+        return res.json({ success: true, message: 'Correo enviado correctamente por Brevo', data });
+
+    } catch (error) {
+        console.error("Excepción en endpoint de correo:", error);
+        return res.status(500).json({ error: 'Error interno del servidor al procesar el correo.' });
+    }
+});
 
 
 // Manejo final de rutas no encontradas bajo /api
