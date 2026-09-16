@@ -641,31 +641,25 @@ app.post('/enviar-correo-fianza', async (req, res) => {
     }
 });
 
-// Asegúrate de que tu ruta en el backend haga esto:
 app.post('/api/empresas/registrar-principal', async (req, res) => {
     try {
         const { nombreEmpresa, nombreAdmin, username, password } = req.body;
 
-        // 1. Crear y guardar la empresa principal
+        // Crear la empresa guardando también las credenciales del admin principal dentro del mismo documento
         const nuevaEmpresa = new Empresa({
-            nombre: nombreEmpresa
-        });
-        const empresaGuardada = await nuevaEmpresa.save();
-
-        // 2. Crear y guardar el Administrador asociado vinculado a la empresa
-        // (Verifica que tu modelo de Administrador guarde password y empresaId)
-        const nuevoAdmin = new Administrador({
-            nombre: nombreAdmin,
+            nombre: nombreEmpresa,
+            adminNombre: nombreAdmin,
             username: username.toLowerCase().trim(),
-            password: password, // Asegúrate de guardar el campo password aquí
-            empresaId: empresaGuardada._id,
+            password: password, // Asegúrate de guardar la contraseña aquí
             role: 'admin'
         });
-        await nuevoAdmin.save();
+
+        const empresaGuardada = await nuevaEmpresa.save();
 
         res.status(200).json({
             success: true,
-            message: 'Empresa y administrador principal creados con éxito'
+            message: 'Empresa y cuenta principal creadas con éxito',
+            empresa: empresaGuardada
         });
     } catch (error) {
         console.error("Error al registrar empresa principal:", error);
