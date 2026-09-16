@@ -236,7 +236,6 @@ async function sincronizarCalendariosIcal(empresaIdFiltro = null, adminIdFiltro 
 // EJECUCIÓN AUTOMÁTICA EN SEGUNDO PLANO
 // ==========================================
 
-// 1. Ejecutar la sincronización automáticamente cada 1 minuto (60 seg * 1000 ms)
 const INTERVALO_TIEMPO = 60 * 1000; 
 
 setInterval(() => {
@@ -244,13 +243,11 @@ setInterval(() => {
     sincronizarCalendariosIcal();
 }, INTERVALO_TIEMPO);
 
-// 2. Ejecutar una vez al arrancar el servidor (esperando 10 segundos a que conecte bien la BD)
 setTimeout(() => {
     console.log("🚀 [INICIO] Ejecutando primera sincronización iCal al arrancar el servidor...");
     sincronizarCalendariosIcal();
 }, 10000);
 
-// Almacenar las referencias de los temporizadores activos
 let timersActivos = [];
 
 function limpiarTimersAnteriores() {
@@ -266,7 +263,6 @@ async function programarAlertasDelDia() {
         limpiarTimersAnteriores();
 
         const ahora = new Date();
-
         const programaciones = await Programacion.find({ estado: { $ne: 'completado' } });
 
         programaciones.forEach(prog => {
@@ -338,6 +334,67 @@ async function programarAlertasDelDia() {
 programarAlertasDelDia();
 setInterval(programarAlertasDelDia, 12 * 60 * 60 * 1000);
 setInterval(() => sincronizarCalendariosIcal(), 3 * 60 * 1000);
+
+// ==========================================
+// RUTA DE LOGIN UNIFICADA (SOPORTE MULTI- ROL)
+// ==========================================
+app.post('/api/login', async (req, res) => {
+    try {
+        const { username, password, empresaId } = req.body;
+        if (!username || !password) {
+            return res.status(400).json({ success: false, message: 'Usuario y contraseña obligatorios' });
+        }
+
+        const cleanUsername = username.toLowerCase().trim();
+
+        // 1. Intentar buscar en Empresa Principal
+        let usuario = await Empresa.findOne({ username: cleanUsername, password });
+        let tipo = 'empresa';
+        let resolvedEmpresaId = usuario ? usuario._id : null;
+
+        // 2. Si no es empresa principal, buscar en Administradores secundarios
+        if (!usuario) {
+            const queryAdmin = { username: cleanUsername, password };
+            if (empresaId) queryAdmin.empresaId = empresaId;
+            usuario = await Administrador.findOne(queryAdmin);
+            if (usuario) {
+                tipo = 'administrador';
+                resolvedEmpresaId = usuario.empresaId;
+            }
+        }
+
+        // 3. Si no es admin, buscar en Empleadas
+        if (!usuario) {
+            const queryEmpleada = { username: cleanUsername, password };
+            if (empresaId) queryEmpleada.empresaId = empresaId;
+            usuario = await Empleada.findOne(queryEmpleada);
+            if (usuario) {
+                tipo = 'empleada';
+                resolvedEmpresaId = usuario.empresaId;
+            }
+        }
+
+        if (!usuario) {
+            return res.status(401).json({ success: false, message: 'Credenciales inválidas o usuario no encontrado.' });
+        }
+
+        return res.json({
+            success: true,
+            message: 'Login exitoso',
+            tipo,
+            usuario: {
+                id: usuario._id,
+                nombre: usuario.nombre || usuario.adminNombre || usuario.nombreAdmin || 'Usuario',
+                empresaId: resolvedEmpresaId,
+                role: usuario.role || tipo,
+                ...usuario.toObject()
+            }
+        });
+    } catch (error) {
+        console.error("❌ Error en autenticación /api/login:", error.message);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+});
 
 // Endpoint universal para forzar la sincronización iCal con soporte multi-empresa
 app.all('/api/sincronizar-ical', async (req, res) => {
@@ -482,11 +539,9 @@ app.get('/api/:key', async (req, res) => {
         }
 
         const queryFilter = {};
-
         const empresaId = req.query.empresaId || req.headers['x-empresa-id'] || req.headers['x-company-id'];
         const adminId = req.query.adminId || req.headers['x-admin-id'];
 
-        // Aplicar filtro estricto de empresa de forma obligatoria para tareas-ical y demás módulos protegidos
         if (empresaId && key !== 'empresas' && key !== 'administradores') {
             queryFilter.empresaId = empresaId;
         } else if (!empresaId && key !== 'empresas' && key !== 'administradores') {
@@ -498,12 +553,9 @@ app.get('/api/:key', async (req, res) => {
             if (req.query.paraAdminId) queryFilter.paraAdminId = req.query.paraAdminId;
             if (req.query.estado) queryFilter.estado = req.query.estado;
             if (req.query.deAdminId) queryFilter.deAdminId = req.query.deAdminId;
-        } else if (adminId && key !== 'empresas' && key !== 'administradores') {
-            // Opcional para filtrar por admin si corresponde
         }
 
         const items = await Model.find(queryFilter).exec();
-
         if (!items || items.length === 0) {
             return res.json([]);
         }
@@ -664,12 +716,7 @@ app.post('/enviar-correo-fianza', async (req, res) => {
                 name: BREVO_SENDER_NAME,
                 email: BREVO_SENDER_EMAIL
             },
-            to: [
-                {
-                    email: correo,
-                    name: huesped
-                }
-            ],
+            to: [{ email: correo, name: huesped }],
             subject: `🛡️ Depósito de Garantía Requerido - ${propiedad}`,
             htmlContent: `
                 <div style="font-family: Arial, sans-serif; background-color: #f4f6f8; padding: 20px; color: #333;">
@@ -678,21 +725,15 @@ app.post('/enviar-correo-fianza', async (req, res) => {
                         <p style="font-size: 15px; line-height: 1.5; color: #475569;">
                             Te damos la bienvenida a <strong>${propiedad}</strong>. Para completar tu proceso de registro y asegurar tu estadía, requerimos que emitas el depósito de garantía correspondiente.
                         </p>
-                        
                         <div style="background: #f8fafc; border: 1px solid #e2e8f0; padding: 16px; border-radius: 8px; margin: 20px 0;">
                             <p style="margin: 0 0 8px 0; font-size: 14px; color: #64748b;"><strong>Monto del depósito:</strong> $${Number(monto).toLocaleString()} USD</p>
                             <p style="margin: 0; font-size: 14px; color: #64748b;"><strong>Estado:</strong> <span style="color: #f59e0b; font-weight: bold;">Pendiente de pago</span></p>
                         </div>
-
                         <div style="text-align: center; margin: 30px 0;">
                             <a href="${link}" style="background-color: #0284c7; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 8px; font-weight: bold; display: inline-block; box-shadow: 0 4px 10px rgba(2, 132, 199, 0.2);">
                                 💳 Pagar / Registrar Garantía Segura
                             </a>
                         </div>
-
-                        <p style="font-size: 13px; color: #94a3b8; text-align: center; margin-top: 30px; border-top: 1px solid #f1f5f9; padding-top: 15px;">
-                            Este enlace es único y seguro. Si tienes dudas, comunícate con el administrador de la propiedad.
-                        </p>
                     </div>
                 </div>
             `
@@ -709,14 +750,12 @@ app.post('/enviar-correo-fianza', async (req, res) => {
         });
 
         const data = await response.json();
-
         if (!response.ok) {
             console.error("Error de la API de Brevo:", data);
             return res.status(500).json({ error: 'Error al enviar el correo a través de Brevo', detalle: data });
         }
 
         return res.json({ success: true, message: 'Correo enviado correctamente por Brevo', data });
-
     } catch (error) {
         console.error("Excepción en endpoint de correo:", error);
         return res.status(500).json({ error: 'Error interno del servidor al procesar el correo.' });
@@ -739,18 +778,18 @@ app.post('/api/empresas/registrar-principal', async (req, res) => {
 
         const empresaGuardada = await nuevaEmpresa.save();
 
-        res.status(200).json({
+        return res.status(200).json({
             success: true,
             message: 'Empresa y cuenta principal creadas con éxito',
             empresa: empresaGuardada
         });
     } catch (error) {
-        console.error("Error al registrar empresa principal:", error);
-        res.status(500).json({ success: false, message: error.message });
+        console.error("Error al registrar empresa principal:", error.message);
+        return res.status(500).json({ success: false, message: error.message });
     }
 });
 
-// --- NUEVO: GET Adaptativo por Colección y ID ---
+// GET Adaptativo por Colección y ID
 app.get('/api/:key/:id', async (req, res) => {
     try {
         const { key, id } = req.params;
