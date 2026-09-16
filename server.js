@@ -16,7 +16,7 @@ mongoose.connect(MONGO_URI, {
     serverSelectionTimeoutMS: 5000, // Máximo 5 segs buscando servidor
     socketTimeoutMS: 10000,          // Máximo 10 segs por consulta
 })
-.then(() => console.log('🟢 CONECTADO A MONGO ATLAS (SISTEMA MULTI-EMPRESA)'))
+.then(() => console.log('🟢 CONECTADO A MONGO ATLAS (SISTEMA MULTI-EMPRESA AISLADO)'))
 .catch((err) => console.error('🔴 ERROR DE CONEXIÓN MONGO:', err.message));
 
 // Definición de modelos dinámicos con esquemas flexibles para cada módulo
@@ -90,20 +90,25 @@ async function enviarAlertaTelegram(mensaje) {
     }
 }
 
-async function sincronizarCalendariosIcal() {
-    console.log("🔄 Iniciando sincronización automática de calendarios iCal (Multi-empresa)...");
+async function sincronizarCalendariosIcal(empresaIdFiltro = null, adminIdFiltro = null) {
+    console.log("🔄 Iniciando sincronización automática de calendarios iCal (Multi-empresa estricta)...");
     try {
         if (mongoose.connection.readyState !== 1) {
             console.log("⚠️ MongoDB no está conectado, omitiendo sincronización iCal por ahora.");
             return;
         }
 
-        const propiedadesConIcal = await Propiedad.find({
+        const filtroQuery = {
             $or: [
                 { icalUrl: { $exists: true, $ne: "" } },
                 { urlIcal: { $exists: true, $ne: "" } }
             ]
-        });
+        };
+
+        if (empresaIdFiltro) filtroQuery.empresaId = empresaIdFiltro;
+        if (adminIdFiltro) filtroQuery.adminId = adminIdFiltro;
+
+        const propiedadesConIcal = await Propiedad.find(filtroQuery);
         
         console.log(`🏠 Propiedades con iCal encontradas: ${propiedadesConIcal.length}`);
 
@@ -129,16 +134,19 @@ async function sincronizarCalendariosIcal() {
 
                             if (fechaSalida >= hoy) {
                                 const nombrePropiedad = prop.nombre || 'Propiedad';
+                                const empresaProp = prop.empresaId || null;
+                                const adminProp = prop.adminId || 'global';
                                 
                                 const tareaExistente = await TareaIcal.findOne({
                                     propiedadId: prop._id.toString(),
-                                    descripcion: new RegExp(ev.summary || 'Reserva Externa', 'i')
+                                    descripcion: new RegExp(ev.summary || 'Reserva Externa', 'i'),
+                                    ...(empresaProp ? { empresaId: empresaProp } : {})
                                 });
 
                                 if (!tareaExistente) {
                                     const nuevaTareaIcal = new TareaIcal({
-                                        empresaId: prop.empresaId || null,
-                                        adminId: prop.adminId || 'global',
+                                        empresaId: empresaProp,
+                                        adminId: adminProp,
                                         propiedadId: prop._id.toString(),
                                         propiedadNombre: nombrePropiedad,
                                         tipo: 'limpieza_salida_ical',
@@ -258,13 +266,16 @@ async function programarAlertasDelDia() {
 
 programarAlertasDelDia();
 setInterval(programarAlertasDelDia, 12 * 60 * 60 * 1000);
-setInterval(sincronizarCalendariosIcal, 3 * 60 * 1000);
+setInterval(() => sincronizarCalendariosIcal(), 3 * 60 * 1000);
 
-// Endpoint universal para forzar la sincronización iCal
+// Endpoint universal para forzar la sincronización iCal con soporte multi-empresa
 app.all('/api/sincronizar-ical', async (req, res) => {
     console.log(`📥 ¡Petición ${req.method} recibida para sincronizar iCal manualmente!`);
     try {
-        await sincronizarCalendariosIcal();
+        const empresaId = req.query.empresaId || req.body.empresaId || req.headers['x-empresa-id'] || req.headers['x-company-id'];
+        const adminId = req.query.adminId || req.body.adminId || req.headers['x-admin-id'];
+
+        await sincronizarCalendariosIcal(empresaId, adminId);
         return res.json({ success: true, message: 'Sincronización iCal ejecutada correctamente' });
     } catch (e) {
         console.error("❌ Error en endpoint sincronizar-ical:", e.message);
@@ -286,7 +297,7 @@ app.get('/api/test-db', async (req, res) => {
     }
 });
 
-// Rutas de actualización segura por GET
+// Rutas de actualización segura por GET con validación de propiedad y empresa
 app.get('/api/update-propiedad-safe', async (req, res) => {
     try {
         const { id, status, code, icalUrl, empresaId } = req.query;
@@ -380,7 +391,7 @@ app.post('/api/solicitudes-compartir/:id/responder', async (req, res) => {
     }
 });
 
-// --- ENDPOINTS CRUD ADAPTATIVOS CON AISLAMIENTO MULTI-EMPRESA ---
+// --- ENDPOINTS CRUD ADAPTATIVOS CON AISLAMIENTO MULTI-EMPRESA ESTRICTO ---
 
 // GET Adaptativo por Colección con filtrado estricto por empresaId y adminId
 app.get('/api/:key', async (req, res) => {
@@ -401,13 +412,17 @@ app.get('/api/:key', async (req, res) => {
 
         const queryFilter = {};
 
-        // Extracción de parámetros de aislamiento (Query params o Headers)
-        const empresaId = req.query.empresaId || req.headers['x-empresa-id'];
+        // Extracción robusta de parámetros de aislamiento (Query params o Headers)
+        const empresaId = req.query.empresaId || req.headers['x-empresa-id'] || req.headers['x-company-id'];
         const adminId = req.query.adminId || req.headers['x-admin-id'];
 
-        // Aplicar filtro estricto de Empresa (excepto para la colección de empresas misma o catálogos globales si aplican)
+        // Aplicar filtro estricto de Empresa obligatoriamente (excepto para catálogos globales autorizados)
         if (empresaId && key !== 'empresas' && key !== 'administradores') {
             queryFilter.empresaId = empresaId;
+        } else if (!empresaId && key !== 'empresas' && key !== 'administradores') {
+            // Protección: Si no se provee empresaId para colecciones protegidas, se devuelve vacío para evitar fugas de datos
+            console.warn(`[API SECURITY] Petición a /api/${key} sin empresaId. Retornando vacío.`);
+            return res.json([]);
         }
 
         // Filtros específicos adicionales por colección
@@ -415,7 +430,7 @@ app.get('/api/:key', async (req, res) => {
             if (req.query.paraAdminId) queryFilter.paraAdminId = req.query.paraAdminId;
             if (req.query.estado) queryFilter.estado = req.query.estado;
             if (req.query.deAdminId) queryFilter.deAdminId = req.query.deAdminId;
-        } else if (adminId && key !== 'empresas' && key !== 'administradores' && key !== 'tareas-ical') {
+        } else if (adminId && key !== 'empresas' && key !== 'administradores') {
             queryFilter.adminId = adminId;
         }
 
@@ -434,14 +449,14 @@ app.get('/api/:key', async (req, res) => {
     }
 });
 
-// POST Adaptativo para Colecciones (Inyecta automáticamente empresaId y adminId)
+// POST Adaptativo para Colecciones (Inyecta y asegura automáticamente empresaId y adminId)
 app.post('/api/:key', async (req, res) => {
     try {
         const { key } = req.params;
         const data = req.body;
         
-        const queryEmpresaId = req.query.empresaId || req.headers['x-empresa-id'];
-        const queryAdminId = req.query.adminId || req.headers['x-admin-id'];
+        const queryEmpresaId = req.query.empresaId || req.body.empresaId || req.headers['x-empresa-id'] || req.headers['x-company-id'];
+        const queryAdminId = req.query.adminId || req.body.adminId || req.headers['x-admin-id'];
 
         const Model = modelsMap[key];
         if (!Model) {
@@ -449,7 +464,7 @@ app.post('/api/:key', async (req, res) => {
         }
 
         if (Array.isArray(data)) {
-            if (key !== 'solicitudes-compartir' && key !== 'empresas' && key !== 'administradores' && key !== 'tareas-ical') {
+            if (key !== 'solicitudes-compartir' && key !== 'empresas' && key !== 'administradores') {
                 const empresaId = queryEmpresaId || (data.length > 0 ? data[0].empresaId : null);
                 const filterDelete = empresaId ? { empresaId } : {};
                 await Model.deleteMany(filterDelete);
@@ -650,7 +665,7 @@ app.post('/api/empresas/registrar-principal', async (req, res) => {
             nombre: nombreEmpresa,
             adminNombre: nombreAdmin,
             username: username.toLowerCase().trim(),
-            password: password, // Asegúrate de guardar la contraseña aquí
+            password: password,
             role: 'admin'
         });
 
