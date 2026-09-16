@@ -336,7 +336,7 @@ setInterval(programarAlertasDelDia, 12 * 60 * 60 * 1000);
 setInterval(() => sincronizarCalendariosIcal(), 3 * 60 * 1000);
 
 // ==========================================
-// RUTA DE LOGIN UNIFICADA (SOPORTE MULTI- ROL)
+// RUTA DE LOGIN UNIFICADA (CORREGIDA Y ROBUSTA)
 // ==========================================
 app.post('/api/login', async (req, res) => {
     try {
@@ -347,14 +347,23 @@ app.post('/api/login', async (req, res) => {
 
         const cleanUsername = username.toLowerCase().trim();
 
+        // Creamos una condición OR para buscar por username o email de forma indistinta
+        const queryBase = {
+            $or: [
+                { username: cleanUsername },
+                { email: cleanUsername }
+            ],
+            password: password // (Nota: Si usas en el futuro bcrypt, esto cambiará por compare)
+        };
+
         // 1. Intentar buscar en Empresa Principal
-        let usuario = await Empresa.findOne({ username: cleanUsername, password });
+        let usuario = await Empresa.findOne(queryBase);
         let tipo = 'empresa';
         let resolvedEmpresaId = usuario ? usuario._id : null;
 
         // 2. Si no es empresa principal, buscar en Administradores secundarios
         if (!usuario) {
-            const queryAdmin = { username: cleanUsername, password };
+            const queryAdmin = { ...queryBase };
             if (empresaId) queryAdmin.empresaId = empresaId;
             usuario = await Administrador.findOne(queryAdmin);
             if (usuario) {
@@ -363,10 +372,18 @@ app.post('/api/login', async (req, res) => {
             }
         }
 
-        // 3. Si no es admin, buscar en Empleadas
+        // 3. Si no es admin, buscar en Empleadas (agregando búsqueda por 'nombre' por si guardaron el identificador ahí)
         if (!usuario) {
-            const queryEmpleada = { username: cleanUsername, password };
+            const queryEmpleada = {
+                $or: [
+                    { username: cleanUsername },
+                    { email: cleanUsername },
+                    { nombre: cleanUsername }
+                ],
+                password: password
+            };
             if (empresaId) queryEmpleada.empresaId = empresaId;
+            
             usuario = await Empleada.findOne(queryEmpleada);
             if (usuario) {
                 tipo = 'empleada';
@@ -375,6 +392,7 @@ app.post('/api/login', async (req, res) => {
         }
 
         if (!usuario) {
+            console.warn(`⚠️ Intento de login fallido para el usuario: ${cleanUsername}`);
             return res.status(401).json({ success: false, message: 'Credenciales inválidas o usuario no encontrado.' });
         }
 
