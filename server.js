@@ -732,6 +732,26 @@ app.post('/api/empresas/registrar-principal', async (req, res) => {
     }
 });
 
+// --- NUEVO: GET Adaptativo por Colección y ID ---
+app.get('/api/:key/:id', async (req, res) => {
+    try {
+        const { key, id } = req.params;
+        const Model = modelsMap[key];
+        if (!Model) {
+            return res.status(404).json({ error: true, message: `Ruta /api/${key} inexistente` });
+        }
+
+        const item = await Model.findById(id);
+        if (!item) {
+            return res.status(404).json({ error: true, message: 'Documento no encontrado' });
+        }
+
+        return res.json(item);
+    } catch (error) {
+        return res.status(500).json({ error: true, message: error.message });
+    }
+});
+
 // Manejo final de rutas no encontradas bajo /api
 app.use('/api/*', (req, res) => {
     res.status(404).json({ error: true, message: `Ruta ${req.originalUrl} inexistente` });
