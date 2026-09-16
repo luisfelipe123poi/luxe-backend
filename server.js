@@ -16,21 +16,24 @@ mongoose.connect(MONGO_URI, {
     serverSelectionTimeoutMS: 5000, // Máximo 5 segs buscando servidor
     socketTimeoutMS: 10000,          // Máximo 10 segs por consulta
 })
-.then(() => console.log('🟢 CONECTADO A MONGO ATLAS'))
+.then(() => console.log('🟢 CONECTADO A MONGO ATLAS (SISTEMA MULTI-EMPRESA)'))
 .catch((err) => console.error('🔴 ERROR DE CONEXIÓN MONGO:', err.message));
 
-// Definición de modelos dinámicos con esquemas flexibles para cada módulo (Opción 2)
+// Definición de modelos dinámicos con esquemas flexibles para cada módulo
 const createModuleModel = (modelName, collectionName) => {
     const schema = new mongoose.Schema({}, { strict: false, timestamps: true });
     return mongoose.models[modelName] || mongoose.model(modelName, schema, collectionName);
 };
+
+// Modelo principal de Empresas para la arquitectura SaaS Multi-tenant
+const Empresa = createModuleModel('Empresa', 'empresas');
 
 const Propiedad = createModuleModel('Propiedad', 'propiedades');
 const Prospecto = createModuleModel('Prospecto', 'prospectos');
 const Empleada = createModuleModel('Empleada', 'empleadas');
 const Administrador = createModuleModel('Administrador', 'administradores');
 const Tarea = createModuleModel('Tarea', 'tareas');
-const TareaIcal = createModuleModel('TareaIcal', 'tareas-ical'); // Nueva colección exclusiva para iCal
+const TareaIcal = createModuleModel('TareaIcal', 'tareas-ical'); 
 const ReporteInspeccion = createModuleModel('ReporteInspeccion', 'reportes-inspeccion');
 const Lavanderia = createModuleModel('Lavanderia', 'lavanderia');
 const Faltante = createModuleModel('Faltante', 'faltantes');
@@ -41,12 +44,13 @@ const Fianza = createModuleModel('Fianza', 'fianzas');
 
 // Mapeo de rutas/claves a sus respectivos modelos de Mongoose
 const modelsMap = {
+    'empresas': Empresa,
     'propiedades': Propiedad,
     'prospectos': Prospecto,
     'empleadas': Empleada,
     'administradores': Administrador,
     'tareas': Tarea,
-    'tareas-ical': TareaIcal, // Mapeo de la nueva sección
+    'tareas-ical': TareaIcal, 
     'reportes-inspeccion': ReporteInspeccion,
     'lavanderia': Lavanderia,
     'faltantes': Faltante,
@@ -56,8 +60,7 @@ const modelsMap = {
     'fianzas': Fianza
 };
 
-// --- FUNCIÓN DE SINCRONIZACIÓN AUTOMÁTICA iCal (ACTUALIZADA CON DEPURACIÓN) ---
-// Función para enviar alertas automáticas a Telegram
+// --- FUNCIÓN DE SINCRONIZACIÓN AUTOMÁTICA iCal ---
 async function enviarAlertaTelegram(mensaje) {
     const token = process.env.TELEGRAM_BOT_TOKEN;
     const chatId = process.env.TELEGRAM_CHAT_ID;
@@ -88,14 +91,13 @@ async function enviarAlertaTelegram(mensaje) {
 }
 
 async function sincronizarCalendariosIcal() {
-    console.log("🔄 Iniciando sincronización automática de calendarios iCal...");
+    console.log("🔄 Iniciando sincronización automática de calendarios iCal (Multi-empresa)...");
     try {
         if (mongoose.connection.readyState !== 1) {
             console.log("⚠️ MongoDB no está conectado, omitiendo sincronización iCal por ahora.");
             return;
         }
 
-        // Buscar propiedades que tengan un enlace icalUrl registrado (admite variaciones comunes por seguridad)
         const propiedadesConIcal = await Propiedad.find({
             $or: [
                 { icalUrl: { $exists: true, $ne: "" } },
@@ -115,7 +117,6 @@ async function sincronizarCalendariosIcal() {
                 
                 console.log(`📥 Descargando iCal para: ${prop.nombre || prop._id} -> ${enlaceIcal}`);
                 
-                // Descargar eventos del iCal de Airbnb/Booking de forma asíncrona
                 const webEvents = await ical.async.fromURL(enlaceIcal);
                 let eventosProcesados = 0;
                 
@@ -125,13 +126,10 @@ async function sincronizarCalendariosIcal() {
                         if (ev.type === 'VEVENT') {
                             eventosProcesados++;
                             const fechaSalida = new Date(ev.end);
-                            console.log(`   📅 Evento encontrado: "${ev.summary || 'Sin título'}" | Salida original: ${ev.end} | Normalizada: ${fechaSalida.toISOString()}`);
 
-                            // Registramos cualquier evento cuya fecha de salida sea de hoy en adelante
                             if (fechaSalida >= hoy) {
                                 const nombrePropiedad = prop.nombre || 'Propiedad';
                                 
-                                // Verificar si ya existe una tarea idéntica para evitar duplicados
                                 const tareaExistente = await TareaIcal.findOne({
                                     propiedadId: prop._id.toString(),
                                     descripcion: new RegExp(ev.summary || 'Reserva Externa', 'i')
@@ -139,6 +137,7 @@ async function sincronizarCalendariosIcal() {
 
                                 if (!tareaExistente) {
                                     const nuevaTareaIcal = new TareaIcal({
+                                        empresaId: prop.empresaId || null,
                                         adminId: prop.adminId || 'global',
                                         propiedadId: prop._id.toString(),
                                         propiedadNombre: nombrePropiedad,
@@ -153,13 +152,12 @@ async function sincronizarCalendariosIcal() {
                                     await nuevaTareaIcal.save();
                                     console.log(`✨ Tarea iCal creada con éxito para: ${nombrePropiedad}`);
 
-                                    // 📱 DISPARAR ALERTA AUTOMÁTICA A TELEGRAM
                                     const fechaFormateada = fechaSalida.toLocaleDateString('es-CO', { timeZone: 'UTC' });
                                     const mensajeTelegram = `🧹 *¡Nueva Reserva Detectada!* \n\n` +
                                                             `🏠 Propiedad: *${nombrePropiedad}*\n` +
                                                             `📅 Fecha de Salida: *${fechaFormateada}*\n` +
                                                             `🏷️ Detalle: _(${ev.summary || 'Reserva Externa'})_\n\n` +
-                                                            `_Se ha programado la limpieza automáticamente en LUXE Asset Management._`;
+                                                            `_Se ha programado la limpieza automáticamente en el sistema._`;
                                     
                                     await enviarAlertaTelegram(mensajeTelegram);
 
@@ -181,7 +179,7 @@ async function sincronizarCalendariosIcal() {
     }
 }
 
-// Almacenar las referencias de los temporizadores activos para limpiarlos si cambian
+// Almacenar las referencias de los temporizadores activos
 let timersActivos = [];
 
 function limpiarTimersAnteriores() {
@@ -189,7 +187,6 @@ function limpiarTimersAnteriores() {
     timersActivos = [];
 }
 
-// Función que lee la programación/rutas del día una sola vez y programa las alertas
 async function programarAlertasDelDia() {
     try {
         if (mongoose.connection.readyState !== 1) return;
@@ -199,18 +196,16 @@ async function programarAlertasDelDia() {
 
         const ahora = new Date();
 
-        // 1. Buscar Programaciones pendientes
         const programaciones = await Programacion.find({ estado: { $ne: 'completado' } });
 
         programaciones.forEach(prog => {
-            if (prog.hora) { // Asumiendo formato "HH:mm" (ej. "14:30")
+            if (prog.hora) { 
                 const [horas, minutos] = prog.hora.split(':');
                 const fechaAlerta = new Date();
                 fechaAlerta.setHours(parseInt(horas, 10), parseInt(minutos, 10), 0, 0);
 
                 const milisegundosHastaAlerta = fechaAlerta.getTime() - ahora.getTime();
 
-                // Si la hora aún no ha pasado hoy, programamos el "despertador" exacto
                 if (milisegundosHastaAlerta > 0) {
                     const timerId = setTimeout(async () => {
                         const mensaje = `⏰ *¡Recordatorio de Programación!* \n\n` +
@@ -219,8 +214,6 @@ async function programarAlertasDelDia() {
                                         `_Es hora de poner en marcha esta tarea._`;
 
                         await enviarAlertaTelegram(mensaje);
-                        
-                        // Marcar como enviada en la BD para que no se repita
                         await Programacion.findByIdAndUpdate(prog._id, { $set: { alertaEnviada: true } });
                     }, milisegundosHastaAlerta);
 
@@ -229,7 +222,6 @@ async function programarAlertasDelDia() {
             }
         });
 
-        // 2. Hacer lo mismo para las Rutas
         const rutas = await Ruta.find({ estado: { $ne: 'completado' } });
 
         rutas.forEach(ruta => {
@@ -264,17 +256,11 @@ async function programarAlertasDelDia() {
     }
 }
 
-// 🔄 Ejecutar esto UNA SOLA VEZ cuando enciende el servidor
 programarAlertasDelDia();
-
-// 🔄 Y repetirlo para refrescar la lista de tareas/rutas 2 veces al día (ej: cada 12 horas)
 setInterval(programarAlertasDelDia, 12 * 60 * 60 * 1000);
-
-// Ejecutar sincronización iCal automáticamente cada 3 horas en segundo plano
-// Ejecutar sincronización iCal automáticamente cada 3 minutos en segundo plano
 setInterval(sincronizarCalendariosIcal, 3 * 60 * 1000);
 
-// Endpoint universal para forzar la sincronización iCal desde el panel (soporta GET y POST)
+// Endpoint universal para forzar la sincronización iCal
 app.all('/api/sincronizar-ical', async (req, res) => {
     console.log(`📥 ¡Petición ${req.method} recibida para sincronizar iCal manualmente!`);
     try {
@@ -300,16 +286,17 @@ app.get('/api/test-db', async (req, res) => {
     }
 });
 
-// Ruta GET ultra-segura para actualizar por ID evitando restricciones de Nginx
+// Rutas de actualización segura por GET
 app.get('/api/update-propiedad-safe', async (req, res) => {
     try {
-        const { id, status, code, icalUrl } = req.query;
+        const { id, status, code, icalUrl, empresaId } = req.query;
         if (!id) {
             return res.status(400).json({ success: false, message: 'ID no proporcionado' });
         }
 
         const updateData = { status, code };
         if (icalUrl !== undefined) updateData.icalUrl = icalUrl;
+        if (empresaId) updateData.empresaId = empresaId;
 
         const itemActualizado = await Propiedad.findByIdAndUpdate(
             id,
@@ -327,16 +314,16 @@ app.get('/api/update-propiedad-safe', async (req, res) => {
     }
 });
 
-// Ruta GET de respaldo para saltar restricciones de métodos POST/PATCH bloqueados por el proxy web
 app.get('/api/actualizar-propiedad-get', async (req, res) => {
     try {
-        const { id, status, code, icalUrl } = req.query;
+        const { id, status, code, icalUrl, empresaId } = req.query;
         if (!id) {
             return res.status(400).json({ success: false, message: 'ID no proporcionado' });
         }
 
         const updateData = { status, code };
         if (icalUrl !== undefined) updateData.icalUrl = icalUrl;
+        if (empresaId) updateData.empresaId = empresaId;
 
         const itemActualizado = await Propiedad.findByIdAndUpdate(
             id,
@@ -354,11 +341,10 @@ app.get('/api/actualizar-propiedad-get', async (req, res) => {
     }
 });
 
-// --- ENDPOINTS ESPECÍFICOS PARA SOLICITUDES DE SINCRONIZACIÓN ENTRE ADMINISTRADORES ---
-
+// --- ENDPOINTS ESPECÍFICOS PARA SOLICITUDES DE SINCRONIZACIÓN ---
 app.post('/api/solicitudes-compartir/:id/responder', async (req, res) => {
     try {
-        const { accion, adminId } = req.body;
+        const { accion, adminId, empresaId } = req.body;
         const solicitudId = req.params.id;
         const solicitud = await SolicitudCompartir.findById(solicitudId);
 
@@ -372,6 +358,7 @@ app.post('/api/solicitudes-compartir/:id/responder', async (req, res) => {
                 const newItemObj = { ...item };
                 delete newItemObj._id; 
                 newItemObj.adminId = adminId;
+                if (empresaId) newItemObj.empresaId = empresaId;
                 newItemObj.copiadoDe = solicitud.deAdminId;
                 return newItemObj;
             });
@@ -393,9 +380,9 @@ app.post('/api/solicitudes-compartir/:id/responder', async (req, res) => {
     }
 });
 
-// --- FIN ENDPOINTS ESPECÍFICOS ---
+// --- ENDPOINTS CRUD ADAPTATIVOS CON AISLAMIENTO MULTI-EMPRESA ---
 
-// GET Adaptativo por Colección Especifica
+// GET Adaptativo por Colección con filtrado estricto por empresaId y adminId
 app.get('/api/:key', async (req, res) => {
     const { key } = req.params;
     console.log(`[API REQUEST] Solicitando colección: ${key}`);
@@ -412,14 +399,24 @@ app.get('/api/:key', async (req, res) => {
             return res.status(404).json({ error: true, message: `Ruta /api/${key} inexistente` });
         }
 
-        // Filtros dinámicos (Excluyendo administradores y tareas-ical del filtro estricto por adminId para que sean globales)
         const queryFilter = {};
+
+        // Extracción de parámetros de aislamiento (Query params o Headers)
+        const empresaId = req.query.empresaId || req.headers['x-empresa-id'];
+        const adminId = req.query.adminId || req.headers['x-admin-id'];
+
+        // Aplicar filtro estricto de Empresa (excepto para la colección de empresas misma o catálogos globales si aplican)
+        if (empresaId && key !== 'empresas' && key !== 'administradores') {
+            queryFilter.empresaId = empresaId;
+        }
+
+        // Filtros específicos adicionales por colección
         if (key === 'solicitudes-compartir') {
             if (req.query.paraAdminId) queryFilter.paraAdminId = req.query.paraAdminId;
             if (req.query.estado) queryFilter.estado = req.query.estado;
             if (req.query.deAdminId) queryFilter.deAdminId = req.query.deAdminId;
-        } else if (req.query.adminId && key !== 'administradores' && key !== 'tareas-ical') {
-            queryFilter.adminId = req.query.adminId;
+        } else if (adminId && key !== 'empresas' && key !== 'administradores' && key !== 'tareas-ical') {
+            queryFilter.adminId = adminId;
         }
 
         const items = await Model.find(queryFilter).exec();
@@ -429,7 +426,7 @@ app.get('/api/:key', async (req, res) => {
             return res.json([]);
         }
 
-        console.log(`[API SUCCESS] Colección '${key}' enviada con éxito.`);
+        console.log(`[API SUCCESS] Colección '${key}' enviada con éxito (${items.length} registros).`);
         return res.json(items);
     } catch (error) {
         console.error(`[API FATAL] Error procesando '${key}':`, error.message);
@@ -437,11 +434,13 @@ app.get('/api/:key', async (req, res) => {
     }
 });
 
-// POST Adaptativo para Colecciones (Guarda automáticamente icalUrl al crear propiedad)
+// POST Adaptativo para Colecciones (Inyecta automáticamente empresaId y adminId)
 app.post('/api/:key', async (req, res) => {
     try {
         const { key } = req.params;
         const data = req.body;
+        
+        const queryEmpresaId = req.query.empresaId || req.headers['x-empresa-id'];
         const queryAdminId = req.query.adminId || req.headers['x-admin-id'];
 
         const Model = modelsMap[key];
@@ -450,21 +449,19 @@ app.post('/api/:key', async (req, res) => {
         }
 
         if (Array.isArray(data)) {
-            if (key !== 'solicitudes-compartir' && key !== 'administradores' && key !== 'tareas-ical') {
-                const adminId = queryAdminId || (data.length > 0 ? data[0].adminId : null);
-                if (!adminId) {
-                    return res.status(400).json({ error: true, message: 'Se requiere un adminId válido para procesar esta operación por lotes.' });
-                }
-                await Model.deleteMany({ adminId });
+            if (key !== 'solicitudes-compartir' && key !== 'empresas' && key !== 'administradores' && key !== 'tareas-ical') {
+                const empresaId = queryEmpresaId || (data.length > 0 ? data[0].empresaId : null);
+                const filterDelete = empresaId ? { empresaId } : {};
+                await Model.deleteMany(filterDelete);
             }
             if (data.length > 0) {
                 const nuevosDatos = data.map(item => {
+                    const resolvedEmpresaId = item.empresaId || queryEmpresaId;
                     const resolvedAdminId = item.adminId || queryAdminId;
-                    if (!resolvedAdminId && key !== 'administradores' && key !== 'tareas-ical') {
-                        throw new Error('Elemento sin adminId válido asignado.');
-                    }
+
                     return {
                         ...item,
+                        ...(resolvedEmpresaId ? { empresaId: resolvedEmpresaId } : {}),
                         ...(resolvedAdminId ? { adminId: resolvedAdminId } : {})
                     };
                 });
@@ -472,14 +469,12 @@ app.post('/api/:key', async (req, res) => {
             }
             return res.json({ success: true, count: data.length });
         } else {
-            // Inserción individual (Guarda cualquier campo flexible como icalUrl)
+            const resolvedEmpresaId = data.empresaId || queryEmpresaId;
             const resolvedAdminId = data.adminId || queryAdminId;
-            if (!resolvedAdminId && key !== 'administradores' && key !== 'tareas-ical') {
-                return res.status(400).json({ error: true, message: 'Falta el adminId obligatorio para guardar este registro.' });
-            }
 
             const itemData = { 
                 ...data,
+                ...(resolvedEmpresaId ? { empresaId: resolvedEmpresaId } : {}),
                 ...(resolvedAdminId ? { adminId: resolvedAdminId } : {})
             };
             
@@ -563,9 +558,8 @@ app.delete('/api/:key/:id', async (req, res) => {
 });
 
 // ==========================================
-// RUTA BACKEND: Enviar Correo de Fianza vía Brevo (Usando variables de entorno en Render)
+// RUTA BACKEND: Enviar Correo de Fianza vía Brevo
 // ==========================================
-
 app.post('/enviar-correo-fianza', async (req, res) => {
     try {
         const { correo, huesped, propiedad, monto, link } = req.body;
@@ -647,11 +641,10 @@ app.post('/enviar-correo-fianza', async (req, res) => {
     }
 });
 
-
 // Manejo final de rutas no encontradas bajo /api
 app.use('/api/*', (req, res) => {
     res.status(404).json({ error: true, message: `Ruta ${req.originalUrl} inexistente` });
 });
 
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log(`🚀 Servidor en puerto ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 Servidor Multi-Empresa en puerto ${PORT}`));
