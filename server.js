@@ -139,6 +139,7 @@ async function sincronizarCalendariosIcal(empresaIdFiltro = null, adminIdFiltro 
             return;
         }
 
+        // AQUÍ ESTÁ LA LÍNEA CORREGIDA SIN BARRAS DE ESCAPE
         const filtroQuery = {
             $or: [
                 { icalUrl: { \(exists: true,\)ne: "" } },
@@ -236,7 +237,7 @@ async function sincronizarCalendariosIcal(empresaIdFiltro = null, adminIdFiltro 
 // EJECUCIÓN AUTOMÁTICA EN SEGUNDO PLANO
 // ==========================================
 
-// 1. Ejecutar la sincronización automáticamente cada 1 minuto (60 seg * 1000 ms)
+// 1. Ejecutar la sincronización automáticamente cada 1 minuto
 const INTERVALO_TIEMPO = 60 * 1000; 
 
 setInterval(() => {
@@ -244,7 +245,7 @@ setInterval(() => {
     sincronizarCalendariosIcal();
 }, INTERVALO_TIEMPO);
 
-// 2. Ejecutar una vez al arrancar el servidor (esperando 10 segundos a que conecte bien la BD)
+// 2. Ejecutar una vez al arrancar el servidor
 setTimeout(() => {
     console.log("🚀 [INICIO] Ejecutando primera sincronización iCal al arrancar el servidor...");
     sincronizarCalendariosIcal();
@@ -485,7 +486,6 @@ app.get('/api/:key', async (req, res) => {
         const empresaId = req.query.empresaId || req.headers['x-empresa-id'] || req.headers['x-company-id'];
         const adminId = req.query.adminId || req.headers['x-admin-id'];
 
-        // Aplicar filtro estricto de empresa de forma obligatoria para tareas-ical y demás módulos protegidos
         if (empresaId && key !== 'empresas' && key !== 'administradores') {
             queryFilter.empresaId = empresaId;
         } else if (!empresaId && key !== 'empresas' && key !== 'administradores') {
