@@ -232,6 +232,24 @@ async function sincronizarCalendariosIcal(empresaIdFiltro = null, adminIdFiltro 
     }
 }
 
+// ==========================================
+// EJECUCIÓN AUTOMÁTICA EN SEGUNDO PLANO
+// ==========================================
+
+// 1. Ejecutar la sincronización automáticamente cada 1 minuto (60 seg * 1000 ms)
+const INTERVALO_TIEMPO = 60 * 1000; 
+
+setInterval(() => {
+    console.log("⏱️ [AUTOMÁTICO] Ejecutando tarea programada de iCal...");
+    sincronizarCalendariosIcal();
+}, INTERVALO_TIEMPO);
+
+// 2. Ejecutar una vez al arrancar el servidor (esperando 10 segundos a que conecte bien la BD)
+setTimeout(() => {
+    console.log("🚀 [INICIO] Ejecutando primera sincronización iCal al arrancar el servidor...");
+    sincronizarCalendariosIcal();
+}, 10000);
+
 // Almacenar las referencias de los temporizadores activos
 let timersActivos = [];
 
